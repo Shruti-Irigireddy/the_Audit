@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "946304455368",
+    "project_id": "the-audit-ac90c",
+    "storage_bucket": "the-audit-ac90c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:946304455368:android:d1d5f00e6dd521a691cbfd",
+        "android_client_info": {
+          "package_name": "com.karta.the_audit"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBbmsZxKkv2lEtmLCLExQrPXuesDYMZNSk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
