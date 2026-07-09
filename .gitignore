@@ -67,3 +67,6 @@ migrate_working_dir/
 
 # Dart pub temporary folders
 **/ios/Flutter/.last_build_id
+
+# Daos
+**/*.g.dart
