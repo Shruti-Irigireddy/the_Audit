@@ -1,28 +1,12 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
-import 'dart:async';
 
-import '../../app_database.dart';
+import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/database/dtos/vehicle_dtos.dart';
 
 part 'vehicle_dao.g.dart';
 
 const _uuid = Uuid();
-
-class ChecklistItemDraft {
-  final String section;
-  final String label;
-  final String responseType;
-  final bool isRequired;
-  final bool blocksArming;
-
-  const ChecklistItemDraft({
-    required this.section,
-    required this.label,
-    required this.responseType,
-    this.isRequired = true,
-    this.blocksArming = false,
-  });
-}
 
 @DriftAccessor(
   tables: [

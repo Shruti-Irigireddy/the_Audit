@@ -7,7 +7,7 @@ import 'daos/battery/battery_dao.dart';
 import 'daos/pre_field/pre_field_dao.dart';
 import 'daos/pre_flight/pre_flight_dao.dart';
 import 'daos/post_flight/post_flight_dao.dart';
-import 'daos/records/records_dao.dart';
+import 'daos/records/record_dao.dart';
 import 'daos/sync/sync_dao.dart';
 import 'daos/export/export_dao.dart';
 
@@ -424,12 +424,12 @@ part 'app_database.g.dart';
       VehicleDao,
       PayloadDao,
       BatteryDao,
-      // PreFieldDao,
-      // PreFlightDao,
-      // PostFlightDao,
+      PreFieldDao,
+      PreFlightDao,
+      PostFlightDao,
       ExportDao,
-      // RecordsDao,
-      // SyncDao,
+      RecordDao,
+      SyncDao,
     ],
   )
 

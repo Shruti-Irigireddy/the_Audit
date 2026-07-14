@@ -1,113 +1,13 @@
 import 'package:drift/drift.dart';
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/database/dtos/pre_field_dtos.dart';
+import 'package:the_audit/core/database/dtos/shared_dtos.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:async';
 
 part 'pre_field_dao.g.dart';
 
 final _uuid = Uuid();
-
-class SessionUserDraft {
-  final String id;
-  final String userId;
-  final String role;
-
-  const SessionUserDraft({
-    required this.id,
-    required this.userId,
-    required this.role,
-  });
-}
-
-class SessionVehicleDraft {
-  final String id;
-  final String vehicleId;
-  final String? objective;
-
-  const SessionVehicleDraft ({
-    required this.id,
-    required this.vehicleId,
-    this.objective,
-  });
-}
-
-class SessionUserWithUser {
-  final SessionUser sessionUser;
-  final User user;
-
-  const SessionUserWithUser({
-    required this.sessionUser,
-    required this.user,
-  });
-}
-
-class SessionVehicleWithVehicle {
-  final SessionVehicle sessionVehicle;
-  final Vehicle vehicle;
-
-  const SessionVehicleWithVehicle ({
-    required this.sessionVehicle,
-    required this.vehicle,
-  });
-}
-
-class SessionEquipmentCheckWithItem {
-  final SessionEquipmentCheck sessionEquipmentCheck;
-  final EquipmentList equipmentList;
-
-  const SessionEquipmentCheckWithItem ({
-    required this.sessionEquipmentCheck,
-    required this.equipmentList,
-  });
-}
-
-class SessionBatteryWithBattery {
-  final SessionBattery sessionBattery;
-  final Battery battery;
-
-  const SessionBatteryWithBattery ({
-    required this.sessionBattery,
-    required this.battery,
-  });
-}
-
-class PayloadCompatibilityIssue {
-  final String vehicleId;
-  final String sessionVehicleId;
-  final String vehicleName;
-  final String vehicleType;
-  final String payloadId;
-  final String payloadName;
-  final String message;
-
-  const PayloadCompatibilityIssue ({
-    required this.vehicleId,
-    required this.sessionVehicleId,
-    required this.vehicleName,
-    required this.vehicleType,
-    required this.payloadId,
-    required this.payloadName,
-    required this.message,
-  });
-}
-
-class PreFieldSummaryData {
-  final FieldSession session;
-  final List<SessionUserWithUser> teamMembers;
-  final List<SessionVehicleWithVehicle> vehicles;
-  final List<SessionBatteryWithBattery> batteries;
-  final List<SessionEquipmentCheckWithItem> equipmentChecks;
-  final List<PayloadCompatibilityIssue> payloadCompatibilityIssues;
-
-  const PreFieldSummaryData ({
-    required this.session,
-    required this.teamMembers,
-    required this.vehicles,
-    required this.batteries,
-    required this.equipmentChecks,
-    required this.payloadCompatibilityIssues,
-  });
-}
 
 @DriftAccessor(
   tables: [
