@@ -101,6 +101,7 @@ part 'app_database.g.dart';
   }
 
   // Team members - list of userIds (multi-enum) 
+  @TableIndex(name: 'idx_session_users_session_id', columns: {#sessionId})
   class SessionUsers extends Table {
     TextColumn get id => text().customConstraint('PRIMARY KEY')();
     TextColumn get sessionId => text().references(FieldSessions, #sessionId)();
@@ -110,6 +111,7 @@ part 'app_database.g.dart';
   }
 
   // Vehicle taken - list of vehicleIds (multi-enum)
+  @TableIndex(name: 'idx_session_vehicles_session_id', columns: {#sessionId})
   class SessionVehicles extends Table {
     TextColumn get id => text().customConstraint('PRIMARY KEY')();
     TextColumn get sessionId => text().references(FieldSessions, #sessionId)();
@@ -146,6 +148,7 @@ part 'app_database.g.dart';
     DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   }
 
+  @TableIndex(name: 'idx_session_batteries_session_id', columns: {#sessionId})
   class SessionBatteries extends Table {
     TextColumn get id => text().customConstraint('PRIMARY KEY')();
     TextColumn get sessionId => text().references(FieldSessions, #sessionId)();
@@ -171,6 +174,8 @@ part 'app_database.g.dart';
 
   // Compatible vehicle Types - list of vehicleIds (multi-enum)
 
+  @TableIndex(name: 'idx_payload_vehicle_compatibility_payload_id', columns: {#payloadId})
+  @TableIndex(name: 'idx_payload_vehicle_compatibility_vehicle_type', columns: {#vehicleType})
   class PayloadVehicleCompatibility extends Table {
     TextColumn get id => text().customConstraint('PRIMARY KEY')();
     TextColumn get payloadId => text().references(Payloads, #payloadId)();
@@ -191,6 +196,7 @@ part 'app_database.g.dart';
     DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   }
 
+  @TableIndex(name: 'idx_session_equipment_checks_session_id', columns: {#sessionId})
   class SessionEquipmentChecks extends Table {
     TextColumn get id => text().customConstraint('PRIMARY KEY')();
     TextColumn get sessionId => text().references(FieldSessions, #sessionId)();
@@ -208,6 +214,8 @@ part 'app_database.g.dart';
     ];
   }
 
+  @TableIndex(name: 'idx_sorties_session_id', columns: {#sessionId})
+  @TableIndex(name: 'idx_sorties_flight_status', columns: {#flightStatus})
   class Sorties extends Table {
     TextColumn get flightId => text().customConstraint('PRIMARY KEY')();
     TextColumn get sessionId => text().references(FieldSessions, #sessionId)();
@@ -240,6 +248,7 @@ part 'app_database.g.dart';
     ];
   }
 
+  @TableIndex(name: 'idx_sortie_payloads_flight_id', columns: {#flightId})
   class SortiePayloads extends Table {
     TextColumn get id => text().customConstraint('PRIMARY KEY')();
     TextColumn get flightId => text().references(Sorties, #flightId)();
@@ -252,6 +261,7 @@ part 'app_database.g.dart';
         ];
   }
 
+  @TableIndex(name: 'idx_sortie_batteries_flight_id', columns: {#flightId})
   class SortieBatteries extends Table {
     TextColumn get id => text().customConstraint('PRIMARY KEY')();
     TextColumn get flightId => text().references(Sorties, #flightId)();
@@ -269,6 +279,7 @@ part 'app_database.g.dart';
         ];
   }
 
+  @TableIndex(name: 'idx_sortie_users_flight_id', columns: {#flightId})
   class SortieUsers extends Table {
     TextColumn get id => text().customConstraint('PRIMARY KEY')();
     TextColumn get flightId => text().references(Sorties, #flightId)();
@@ -282,6 +293,7 @@ part 'app_database.g.dart';
     ];
   }
 
+  @TableIndex(name: 'idx_checklist_responses_flight_id', columns: {#flightId})
   class ChecklistResponses extends Table {
     TextColumn get id => text().customConstraint('PRIMARY KEY')();
     TextColumn get flightId => text().references(Sorties, #flightId)();
@@ -300,6 +312,7 @@ part 'app_database.g.dart';
         ];  
   }
 
+  @TableIndex(name: 'idx_post_flight_notes_flight_id', columns: {#flightId})
   class PostFlightNotes extends Table {
     TextColumn get id => text().customConstraint('PRIMARY KEY')();
     TextColumn get flightId => text().references(Sorties, #flightId).unique()();
@@ -322,6 +335,7 @@ part 'app_database.g.dart';
     DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
   }
 
+  @TableIndex(name: 'idx_checklist_overrides_flight_id', columns: {#flightId})
   class ChecklistOverrides extends Table {
     TextColumn get id => text().customConstraint('PRIMARY KEY')();
     TextColumn get flightId => text().references(Sorties, #flightId)();
@@ -332,6 +346,7 @@ part 'app_database.g.dart';
     DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   }
 
+  @TableIndex(name: 'idx_audit_events_entity', columns: {#entityType, #entityId})
   class AuditEvents extends Table {
     IntColumn get id => integer().customConstraint('PRIMARY KEY').autoIncrement()();
     TextColumn get entityType => text()(); // User, Vehicle, Flight, Battery, Payload
@@ -342,6 +357,7 @@ part 'app_database.g.dart';
     DateTimeColumn get performedAt => dateTime().withDefault(currentDateAndTime)();
   }
 
+  @TableIndex(name: 'idx_record_amendments_entity', columns: {#entityType, #entityId})
   class RecordAmendments extends Table {
     TextColumn get id => text().customConstraint('PRIMARY KEY')();
     TextColumn get entityType => text()(); // SORTIE, POST_FLIGHT_NOTES, CHECKLIST_RESPONSE
@@ -354,6 +370,8 @@ part 'app_database.g.dart';
   //ObjectiveTags
   //SessionVehicleObjectiveTags
 
+  @TableIndex(name: 'idx_export_records_status', columns: {#exportStatus})
+  @TableIndex(name: 'idx_export_records_entity', columns: {#entityType, #entityId})
   class ExportRecords extends Table {
     IntColumn get id => integer().customConstraint('PRIMARY KEY').autoIncrement()();
     TextColumn get entityType => text()(); // User, Vehicle, Flight, Battery, Payload
@@ -368,6 +386,8 @@ part 'app_database.g.dart';
     DateTimeColumn get generatedAt => dateTime().withDefault(currentDateAndTime)();
   }
 
+  @TableIndex(name: 'idx_sync_queue_status', columns: {#syncStatus})
+  @TableIndex(name: 'idx_sync_queue_entity', columns: {#entityType, #entityId})
   class SyncQueue extends Table {
     IntColumn get id => integer().customConstraint('PRIMARY KEY').autoIncrement()();
     TextColumn get entityType => text()();

@@ -208,13 +208,29 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
     }).toList();
   }
 
-  Future<List<SessionEquipmentCheck>> getSessionEquipmentChecks(
+  Future<List<SessionEquipmentCheckWithItem>> getSessionEquipmentChecks(
     String sessionId,
-  ) {
-    return (select(db.sessionEquipmentChecks)
-          ..where((v) => v.sessionId.equals(sessionId))
-          ..orderBy([(v) => OrderingTerm.asc(v.checkedAt)]))
-        .get();
+  ) async {
+    final query =
+        select(db.sessionEquipmentChecks).join([
+            innerJoin(
+              db.equipmentLists,
+              db.equipmentLists.id.equalsExp(
+                db.sessionEquipmentChecks.equipmentId,
+              ),
+            ),
+          ])
+          ..where(db.sessionEquipmentChecks.sessionId.equals(sessionId))
+          ..orderBy([OrderingTerm.asc(db.sessionEquipmentChecks.checkedAt)]);
+
+    final rows = await query.get();
+
+    return rows.map((row) {
+      return SessionEquipmentCheckWithItem(
+        sessionEquipmentCheck: row.readTable(db.sessionEquipmentChecks),
+        equipmentList: row.readTable(db.equipmentLists),
+      );
+    }).toList();
   }
 
   Future<Sorty?> getSortieById(String flightId) {

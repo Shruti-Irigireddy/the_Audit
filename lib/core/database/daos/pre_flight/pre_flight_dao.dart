@@ -1024,17 +1024,77 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
     required List<ChecklistResponseDraft> responses,
     required String createdBy,
   }) async {
-    for (final response in responses) {
-      await saveChecklistResponse(
-        flightId: flightId,
-        itemId: response.itemId,
-        response: response.response,
-        valueText: response.valueText,
-        valueNumber: response.valueNumber,
-        notes: response.notes,
-        createdBy: createdBy,
-      );
-    }
+    await _ensureSortieEditable(flightId);
+
+    final sortie = await _requireSortie(flightId);
+    final now = DateTime.now();
+
+    await transaction(() async {
+      for (final response in responses) {
+        final item = await (select(db.checklistItems)
+              ..where((v) => v.id.equals(response.itemId)))
+            .getSingleOrNull();
+
+        if (item == null) {
+          throw Exception('Checklist item not found: ${response.itemId}');
+        }
+
+        if (item.templateId != sortie.checklistTemplateId) {
+          throw Exception('Checklist item does not belong to sortie template.');
+        }
+
+        final existingResponse = await (select(db.checklistResponses)
+              ..where(
+                (v) =>
+                    v.flightId.equals(flightId) &
+                    v.itemId.equals(response.itemId),
+              ))
+            .getSingleOrNull();
+
+        if (existingResponse == null) {
+          await into(db.checklistResponses).insert(
+            ChecklistResponsesCompanion.insert(
+              id: _uuid.v4(),
+              flightId: flightId,
+              itemId: response.itemId,
+              response: response.response,
+              valueText: Value(response.valueText),
+              valueNumber: Value(response.valueNumber),
+              notes: Value(response.notes),
+              createdBy: createdBy,
+            ),
+          );
+        } else {
+          await (update(db.checklistResponses)
+                ..where((v) => v.id.equals(existingResponse.id)))
+              .write(
+            ChecklistResponsesCompanion(
+              response: Value(response.response),
+              valueText: Value(response.valueText),
+              valueNumber: Value(response.valueNumber),
+              notes: Value(response.notes),
+              updatedAt: Value(now),
+            ),
+          );
+        }
+
+        await _insertAuditEvent(
+          entityType: 'CHECKLIST_RESPONSE',
+          entityId: '$flightId:${response.itemId}',
+          action: existingResponse == null ? 'CREATE' : 'UPDATE',
+          description: 'Checklist response saved',
+          performedBy: createdBy,
+        );
+
+        await _enqueueSync(
+          entityType: 'CHECKLIST_RESPONSE',
+          entityId: '$flightId:${response.itemId}',
+          operation: existingResponse == null ? 'INSERT' : 'UPDATE',
+        );
+      }
+
+      await _touchSortie(flightId);
+    });
   }
 
   Future<List<ChecklistResponseWithItem>> getChecklistResponsesForFlight(

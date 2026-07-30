@@ -565,15 +565,65 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
     required List<BatteryEndStateDraft> batteries,
     required String performedBy,
   }) async {
+    await _ensurePostFlightEditable(flightId);
+
     for (final battery in batteries) {
-      await saveBatteryEndState(
-        flightId: flightId,
-        batteryId: battery.batteryId,
+      _validateBatteryEndState(
         voltageEnd: battery.voltageEnd,
         percentEnd: battery.percentEnd,
-        performedBy: performedBy,
       );
     }
+
+    final sortie = await _requireSortie(flightId);
+    final existingBatteries = await (select(db.sortieBatteries)
+          ..where((v) => v.flightId.equals(flightId)))
+        .get();
+    final existingBatteryIds = existingBatteries.map((v) => v.batteryId).toSet();
+
+    for (final battery in batteries) {
+      if (!existingBatteryIds.contains(battery.batteryId)) {
+        throw Exception(
+          'Battery ${battery.batteryId} was not selected for this sortie.',
+        );
+      }
+    }
+
+    final now = DateTime.now();
+
+    await transaction(() async {
+      for (final battery in batteries) {
+        await (update(db.sortieBatteries)
+              ..where(
+                (v) =>
+                    v.flightId.equals(flightId) &
+                    v.batteryId.equals(battery.batteryId),
+              ))
+            .write(
+          SortieBatteriesCompanion(
+            voltageEnd: Value(battery.voltageEnd),
+            percentEnd: Value(battery.percentEnd),
+            updatedAt: Value(now),
+          ),
+        );
+
+        await _insertAuditEvent(
+          entityType: 'SORTIE_BATTERY',
+          entityId: '$flightId:${battery.batteryId}',
+          action: 'UPDATE_END_STATE',
+          description: 'Battery end state saved',
+          performedBy: performedBy,
+        );
+
+        await _enqueueSync(
+          entityType: 'SORTIE_BATTERY',
+          entityId: '$flightId:${battery.batteryId}',
+          operation: 'UPDATE',
+        );
+      }
+
+      await _touchSortie(flightId, now: now);
+      await _touchSession(sortie.sessionId, now: now);
+    });
   }
 
   Future<int> countBatteriesWithoutEndState(String flightId) async {

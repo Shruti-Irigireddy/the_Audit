@@ -20,7 +20,7 @@ const _uuid = Uuid();
 class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
   PayloadDao(super.db);
 
-  Future<void> CreatePayload({
+  Future<void> createPayload({
     required String payloadId,
     required String name,
     required String category,

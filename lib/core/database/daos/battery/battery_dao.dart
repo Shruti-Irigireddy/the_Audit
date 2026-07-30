@@ -2,6 +2,8 @@ import 'package:drift/drift.dart';
 import 'dart:async';
 
 import '../../app_database.dart';
+import '../../dao_write_helpers.dart';
+import '../../database_constants.dart';
 
 part 'battery_dao.g.dart';
 
@@ -13,7 +15,7 @@ part 'battery_dao.g.dart';
   ],
 )
 
-class BatteryDao extends DatabaseAccessor<AppDatabase> with _$BatteryDaoMixin{
+class BatteryDao extends DatabaseAccessor<AppDatabase> with _$BatteryDaoMixin, DaoWriteHelpers{
   BatteryDao(super.db);
 
   Future<void> createBattery({
@@ -37,22 +39,18 @@ class BatteryDao extends DatabaseAccessor<AppDatabase> with _$BatteryDaoMixin{
         ),
       );
 
-      await into(db.auditEvents).insert(
-        AuditEventsCompanion.insert(
-          entityType: 'BATTERIES', 
-          entityId: batteryId, 
-          action: 'CREATE',
-          description: Value('Batteries info tab created'), 
-          performedBy: performedBy
-        ),
+      await insertAuditEvent(
+        entityType: DbEntityTypes.battery,
+        entityId: batteryId,
+        action: DbActions.create,
+        description: 'Batteries info tab created',
+        performedBy: performedBy,
       );
 
-      await into(db.syncQueue).insert(
-        SyncQueueCompanion.insert(
-          entityType: 'BATTERIES', 
-          entityId: batteryId, 
-          operation: 'INSERT',
-        ),
+      await enqueueSync(
+        entityType: DbEntityTypes.battery,
+        entityId: batteryId,
+        operation: DbSyncOperations.insert,
       );
     });
   }
@@ -65,7 +63,7 @@ class BatteryDao extends DatabaseAccessor<AppDatabase> with _$BatteryDaoMixin{
 
   Future<List<Battery>> getAllActiveBatteries(){
     return (select(db.batteries)
-          ..where((v) => v.status.equals('ACTIVE'))
+          ..where((v) => v.status.equals(DbStatuses.active))
           ..orderBy([
             (v) => OrderingTerm.asc(v.capacity)
           ]))
@@ -103,22 +101,18 @@ class BatteryDao extends DatabaseAccessor<AppDatabase> with _$BatteryDaoMixin{
             )
           );
     
-    await into(db.auditEvents).insert(
-      AuditEventsCompanion.insert(
-        entityType: 'BATTERY', 
-        entityId: batteryId, 
-        action: "UPDATE",
-        description: Value('Batteries updated'), 
-        performedBy: performedBy
-      ),
+    await insertAuditEvent(
+      entityType: DbEntityTypes.battery,
+      entityId: batteryId,
+      action: DbActions.update,
+      description: 'Batteries updated',
+      performedBy: performedBy,
     );
 
-    await into(db.syncQueue).insert(
-      SyncQueueCompanion.insert(
-        entityType: 'BATTERY', 
-        entityId: batteryId, 
-        operation: 'UPDATE',
-      ),
+    await enqueueSync(
+      entityType: DbEntityTypes.battery,
+      entityId: batteryId,
+      operation: DbSyncOperations.update,
     );
     });
   }
@@ -132,27 +126,23 @@ class BatteryDao extends DatabaseAccessor<AppDatabase> with _$BatteryDaoMixin{
       ..where((v) => v.batteryId.equals(batteryId)))
       .write(
         BatteriesCompanion(
-          status: const Value('RETIRED'),
+          status: const Value(DbStatuses.retired),
           updatedAt: Value(DateTime.now()),
         ),
       );
 
-    await into(db.auditEvents).insert(
-        AuditEventsCompanion.insert(
-          entityType: 'BATTERY',
+    await insertAuditEvent(
+          entityType: DbEntityTypes.battery,
           entityId: batteryId,
-          action: 'RETIRE',
-          description: Value('Battery retired'),
+          action: DbActions.retire,
+          description: 'Battery retired',
           performedBy: performedBy,
-        ),
       );
 
-      await into(db.syncQueue).insert(
-        SyncQueueCompanion.insert(
-          entityType: 'BATTERY',
-          entityId: batteryId,
-          operation: 'UPDATE',
-        ),
+      await enqueueSync(
+        entityType: DbEntityTypes.battery,
+        entityId: batteryId,
+        operation: DbSyncOperations.update,
       );
     });
   }
