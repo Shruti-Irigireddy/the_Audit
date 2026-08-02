@@ -3,7 +3,6 @@ import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/database/dtos/pre_field_dtos.dart';
 import 'package:the_audit/core/database/dtos/shared_dtos.dart';
 import 'package:uuid/uuid.dart';
-import 'dart:async';
 
 part 'pre_field_dao.g.dart';
 
@@ -30,9 +29,9 @@ final _uuid = Uuid();
 )
 class PreFieldDao extends DatabaseAccessor<AppDatabase> with _$PreFieldDaoMixin {
   PreFieldDao(super.db);
-  
-  Future<void> createFieldSession ({
-    required String sessionId,
+
+  Future<String> createFieldSession ({
+    String? sessionId,
     required DateTime date,
     required String locationName,
     required double latitude,
@@ -40,22 +39,24 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase> with _$PreFieldDaoMixin 
     required String missionType,
     required String createdBy,
   }) async {
+    final resolvedSessionId = sessionId ?? _uuid.v4();
+
     await transaction(() async {
       await into(db.fieldSessions).insert(
         FieldSessionsCompanion.insert(
-          sessionId: sessionId, 
-          date: date, 
-          locationName: locationName, 
-          latitude: latitude, 
-          longitude: longitude, 
-          missionType: missionType, 
-          sessionStatus: 'IN_PROGRESS'
+          sessionId: resolvedSessionId,
+          date: date,
+          locationName: locationName,
+          latitude: latitude,
+          longitude: longitude,
+          missionType: missionType,
+          sessionStatus: 'IN_PROGRESS',
         ),
       );
 
-       await _insertAuditEvent(
+      await _insertAuditEvent(
         entityType: 'FIELD_SESSION',
-        entityId: sessionId,
+        entityId: resolvedSessionId,
         action: 'CREATE',
         description: 'Field session created',
         performedBy: createdBy,
@@ -63,13 +64,15 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase> with _$PreFieldDaoMixin 
 
       await _enqueueSync(
         entityType: 'FIELD_SESSION',
-        entityId: sessionId,
+        entityId: resolvedSessionId,
         operation: 'INSERT',
       );
     });
+
+    return resolvedSessionId;
   }
 
-  Future<void> updateFieldSession ({
+  Future<void> updateFieldSessionBasicInfo({
     required String sessionId,
     DateTime? date,
     String? locationName,
@@ -78,20 +81,25 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase> with _$PreFieldDaoMixin 
     String? missionType,
     required String performedBy,
   }) async {
+    await _requireFieldSession(sessionId);
+
     await transaction(() async {
-        await (update(fieldSessions)
-              ..where((v) => v.sessionId.equals(sessionId)))
-              .write(
-                FieldSessionsCompanion(
-                  date: date == null ? const Value.absent() : Value(date),
-                  locationName: locationName == null ? const Value.absent() : Value(locationName),
-                  latitude: latitude == null ? const Value.absent() : Value(latitude),
-                  longitude: longitude == null ? const Value.absent() : Value(longitude),
-                  missionType: missionType == null ? const Value.absent() : Value(missionType),
-                  updatedAt: Value(DateTime.now())
-                ),
-              );
-        await _insertAuditEvent(
+      await (update(db.fieldSessions)
+            ..where((v) => v.sessionId.equals(sessionId)))
+          .write(
+        FieldSessionsCompanion(
+          date: date == null ? const Value.absent() : Value(date),
+          locationName:
+              locationName == null ? const Value.absent() : Value(locationName),
+          latitude: latitude == null ? const Value.absent() : Value(latitude),
+          longitude: longitude == null ? const Value.absent() : Value(longitude),
+          missionType:
+              missionType == null ? const Value.absent() : Value(missionType),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
+
+      await _insertAuditEvent(
         entityType: 'FIELD_SESSION',
         entityId: sessionId,
         action: 'UPDATE',
@@ -113,31 +121,40 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase> with _$PreFieldDaoMixin 
           .getSingleOrNull();
   }
 
-  Future<List<FieldSession?>> getInProgressFieldSessions() {
+  Future<List<FieldSession>> getInProgressFieldSessions() {
     return (select(db.fieldSessions)
           ..where((v) => v.sessionStatus.equals('IN_PROGRESS'))
           ..orderBy([
             (v) => OrderingTerm.desc(v.updatedAt),
           ]))
-          .get();
+        .get();
   }
 
   Future<void> closeFieldSession ({
     required String sessionId,
     required String closedBy,
-    }) async {
-      await transaction(() async {
-        await (update(db.fieldSessions)
-              ..where((v) => v.sessionId.equals(sessionId)))
-              .write(
-                FieldSessionsCompanion(
-                  sessionStatus: const Value('CLOSED'),
-                  closedAt: Value(DateTime.now()),
-                  closedBy: Value(closedBy),
-                  updatedAt: Value(DateTime.now())
-                ),
-              );
-        await _insertAuditEvent(
+  }) async {
+    final session = await _requireFieldSession(sessionId);
+
+    if (session.sessionStatus == 'CLOSED') {
+      throw Exception('Field session is already closed: $sessionId');
+    }
+
+    final now = DateTime.now();
+
+    await transaction(() async {
+      await (update(db.fieldSessions)
+            ..where((v) => v.sessionId.equals(sessionId)))
+          .write(
+        FieldSessionsCompanion(
+          sessionStatus: const Value('CLOSED'),
+          closedAt: Value(now),
+          closedBy: Value(closedBy),
+          updatedAt: Value(now),
+        ),
+      );
+
+      await _insertAuditEvent(
         entityType: 'FIELD_SESSION',
         entityId: sessionId,
         action: 'CLOSE',
@@ -150,28 +167,32 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase> with _$PreFieldDaoMixin 
         entityId: sessionId,
         operation: 'UPDATE',
       );
-      });
+    });
   }
 
-  Future<void> addUserToSession ({
-    required String sessionUserId,
+
+  Future<String> addUserToSession({
     required String sessionId,
     required String userId,
     required String role,
     required String performedBy,
   }) async {
+    await _requireFieldSession(sessionId);
+    await _requireUser(userId);
+
+    final sessionUserId = _uuid.v4();
+
     await transaction(() async {
       await into(db.sessionUsers).insert(
         SessionUsersCompanion.insert(
-          id: sessionUserId, 
-          sessionId: sessionId, 
-          userId: userId, 
-          role: role
+          id: sessionUserId,
+          sessionId: sessionId,
+          userId: userId,
+          role: role,
         ),
       );
 
       await _touchSession(sessionId);
-
 
       await _insertAuditEvent(
         entityType: 'SESSION_USER',
@@ -187,59 +208,70 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase> with _$PreFieldDaoMixin 
         operation: 'INSERT',
       );
     });
+
+    return sessionUserId;
   }
 
   Future<void> removeUserFromSession ({
     required String sessionUserId,
     required String performedBy,
   }) async {
-    final sessionUser = await (select(sessionUsers)
-        ..where((v) => v.id.equals(sessionUserId)))
-      .getSingleOrNull();
-
-  if (sessionUser == null) {
-    throw Exception('Session user not found: $sessionUserId');
-  }
-
-  await transaction(() async {
-    await (delete(sessionUsers)
+    final sessionUser = await (select(db.sessionUsers)
           ..where((v) => v.id.equals(sessionUserId)))
-        .go();
+        .getSingleOrNull();
 
-    await _touchSession(sessionUser.sessionId);
+    if (sessionUser == null) {
+      throw Exception('Session user not found: $sessionUserId');
+    }
 
-    await _insertAuditEvent(
-      entityType: 'SESSION_USER',
-      entityId: sessionUserId,
-      action: 'DELETE',
-      description: 'User removed from session',
-      performedBy: performedBy,
-    );
+    await transaction(() async {
+      await (delete(db.sessionUsers)..where((v) => v.id.equals(sessionUserId)))
+          .go();
 
-    await _enqueueSync(
-      entityType: 'SESSION_USER',
-      entityId: sessionUserId,
-      operation: 'DELETE',
-    );
-  });
-}
+      await _touchSession(sessionUser.sessionId);
+
+      await _insertAuditEvent(
+        entityType: 'SESSION_USER',
+        entityId: sessionUserId,
+        action: 'DELETE',
+        description: 'User removed from session',
+        performedBy: performedBy,
+      );
+
+      await _enqueueSync(
+        entityType: 'SESSION_USER',
+        entityId: sessionUserId,
+        operation: 'DELETE',
+      );
+    });
+  }
 
   Future<void> replaceSessionUsers ({
     required String sessionId,
     required List<SessionUserDraft> users,
     required String performedBy,
   }) async {
+    await _requireFieldSession(sessionId);
+
     await transaction(() async {
       await (delete(db.sessionUsers)
-          ..where((v) => v.sessionId.equals(sessionId)))
+            ..where((v) => v.sessionId.equals(sessionId)))
           .go();
 
-      for(final user in users) {
+      final seen = <String>{};
+
+      for (final user in users) {
+        final key = '${user.userId}:${user.role}';
+
+        if (!seen.add(key)) continue;
+
+        await _requireUser(user.userId);
+
         await into(db.sessionUsers).insert(
           SessionUsersCompanion.insert(
-            id: user.id, 
-            sessionId: sessionId, 
-            userId: user.userId, 
+            id: _uuid.v4(),
+            sessionId: sessionId,
+            userId: user.userId,
             role: user.role,
           ),
         );
@@ -264,39 +296,39 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase> with _$PreFieldDaoMixin 
   }
 
   Future<List<SessionUserWithUser>> getSessionUsers(String sessionId) async {
-    final query = select(sessionUsers).join([
+    final query = select(db.sessionUsers).join([
       innerJoin(
-        users,
-        users.id.equalsExp(sessionUsers.userId),
+        db.users,
+        db.users.id.equalsExp(db.sessionUsers.userId),
       ),
     ])
-      ..where(sessionUsers.sessionId.equals(sessionId))
+      ..where(db.sessionUsers.sessionId.equals(sessionId))
       ..orderBy([
-        OrderingTerm.asc(sessionUsers.role),
-        OrderingTerm.asc(users.name),
+        OrderingTerm.asc(db.sessionUsers.role),
+        OrderingTerm.asc(db.users.name),
       ]);
 
     final rows = await query.get();
 
     return rows.map((row) {
       return SessionUserWithUser(
-        sessionUser: row.readTable(sessionUsers),
-        user: row.readTable(users),
+        sessionUser: row.readTable(db.sessionUsers),
+        user: row.readTable(db.users),
       );
     }).toList();
   }
-  
+
   Future<int> countSessionUsersByRole({
     required String sessionId,
     required String role,
   }) async {
-    final countExp = sessionUsers.id.count();
+    final countExp = db.sessionUsers.id.count();
 
-    final query = selectOnly(sessionUsers)
+    final query = selectOnly(db.sessionUsers)
       ..addColumns([countExp])
       ..where(
-        sessionUsers.sessionId.equals(sessionId) &
-            sessionUsers.role.equals(role),
+        db.sessionUsers.sessionId.equals(sessionId) &
+            db.sessionUsers.role.equals(role),
       );
 
     final row = await query.getSingle();
@@ -304,20 +336,36 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase> with _$PreFieldDaoMixin 
     return row.read(countExp) ?? 0;
   }
 
-  Future<void> addVehicleToSession({
-    required String sessionVehicleId,
+
+  Future<String> addVehicleToSession({
     required String sessionId,
     required String vehicleId,
     String? objective,
-    required String performedBy
+    required String performedBy,
   }) async {
+    await _requireFieldSession(sessionId);
+    await _requireVehicle(vehicleId);
+
+    final existing = await (select(db.sessionVehicles)
+          ..where(
+            (v) =>
+                v.sessionId.equals(sessionId) & v.vehicleId.equals(vehicleId),
+          ))
+        .getSingleOrNull();
+
+    if (existing != null) {
+      return existing.id;
+    }
+
+    final sessionVehicleId = _uuid.v4();
+
     await transaction(() async {
       await into(db.sessionVehicles).insert(
         SessionVehiclesCompanion.insert(
-          id: sessionVehicleId, 
-          sessionId: sessionId, 
+          id: sessionVehicleId,
+          sessionId: sessionId,
           vehicleId: vehicleId,
-          objective: Value(objective)
+          objective: Value(objective),
         ),
       );
 
@@ -337,32 +385,30 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase> with _$PreFieldDaoMixin 
         operation: 'INSERT',
       );
     });
+
+    return sessionVehicleId;
   }
 
-Future<void> removeVehicleFromSession({
+  Future<void> removeVehicleFromSession({
     required String sessionVehicleId,
     required String performedBy,
   }) async {
-    final sessionVehicle = await (select(sessionVehicles)
-          ..where((v) => v.id.equals(sessionVehicleId)))
-        .getSingleOrNull();
-
-    if (sessionVehicle == null) {
-      throw Exception('Session vehicle not found: $sessionVehicleId');
-    }
+    final sessionVehicle = await _requireSessionVehicle(sessionVehicleId);
 
     final sortieCount = await countSortiesForSessionVehicle(sessionVehicleId);
 
-    if(sortieCount > 0){
-      throw Exception('Cannot remove Vehicle from session because it is being used in a sortie');
+    if (sortieCount > 0) {
+      throw Exception(
+        'Cannot remove vehicle from session because it is being used in a sortie.',
+      );
     }
 
     await transaction(() async {
-      await (delete(sessionVehiclePayload)
+      await (delete(db.sessionVehiclePayload)
             ..where((v) => v.sessionVehicleId.equals(sessionVehicleId)))
           .go();
 
-      await (delete(sessionVehicles)
+      await (delete(db.sessionVehicles)
             ..where((v) => v.id.equals(sessionVehicleId)))
           .go();
 
@@ -384,28 +430,22 @@ Future<void> removeVehicleFromSession({
     });
   }
 
-
-  Future<void> updateSessionVehicleObjective ({
+  Future<void> updateSessionVehicleObjective({
     required String sessionVehicleId,
-    required String objective,
-    required String performedBy
+    String? objective,
+    required String performedBy,
   }) async {
-    final sessionVehicle = await (select(sessionVehicles)
-          ..where((v) => v.id.equals(sessionVehicleId)))
-        .getSingleOrNull();
-
-    if (sessionVehicle == null) {
-      throw Exception('Session vehicle not found: $sessionVehicleId');
-    }
+    final sessionVehicle = await _requireSessionVehicle(sessionVehicleId);
 
     await transaction(() async {
       await (update(db.sessionVehicles)
-        ..where((v) => v.id.equals(sessionVehicleId)))
-        .write(
-          SessionVehiclesCompanion(
-            objective: Value(objective)
-          ),
-        );
+            ..where((v) => v.id.equals(sessionVehicleId)))
+          .write(
+        SessionVehiclesCompanion(
+          objective: Value(objective),
+        ),
+      );
+
       await _touchSession(sessionVehicle.sessionId);
 
       await _insertAuditEvent(
@@ -424,11 +464,13 @@ Future<void> removeVehicleFromSession({
     });
   }
 
-  Future<void> replaceSessionVehicles ({
+  Future<void> replaceSessionVehicles({
     required String sessionId,
     required List<SessionVehicleDraft> vehicles,
-    required String performedBy
+    required String performedBy,
   }) async {
+    await _requireFieldSession(sessionId);
+
     final sortieCount = await countSortiesForSession(sessionId);
 
     if (sortieCount > 0) {
@@ -438,124 +480,140 @@ Future<void> removeVehicleFromSession({
     }
 
     await transaction(() async {
-      final existingSessionVehicle = await (select(db.sessionVehicles)
-          ..where((v) => v.sessionId.equals(sessionId)))
+      final existingSessionVehicles = await (select(db.sessionVehicles)
+            ..where((v) => v.sessionId.equals(sessionId)))
           .get();
 
-      for (final sessionVehicle in existingSessionVehicle){
+      for (final sessionVehicle in existingSessionVehicles) {
         await (delete(db.sessionVehiclePayload)
-            ..where((v) => v.sessionVehicleId.equals(sessionVehicle.id)))
+              ..where((v) => v.sessionVehicleId.equals(sessionVehicle.id)))
             .go();
       }
-        await (delete(db.sessionVehicles)
+
+      await (delete(db.sessionVehicles)
             ..where((v) => v.sessionId.equals(sessionId)))
-            .go();
+          .go();
+
+      final seenVehicleIds = <String>{};
 
       for (final vehicle in vehicles) {
+        if (!seenVehicleIds.add(vehicle.vehicleId)) continue;
+
+        await _requireVehicle(vehicle.vehicleId);
+
         await into(db.sessionVehicles).insert(
           SessionVehiclesCompanion.insert(
-            id: vehicle.id, 
-            sessionId: sessionId, 
+            id: _uuid.v4(),
+            sessionId: sessionId,
             vehicleId: vehicle.vehicleId,
             objective: Value(vehicle.objective),
           ),
         );
       }
-    await _touchSession(sessionId);
 
-    await _insertAuditEvent(
-      entityType: 'FIELD_SESSION',
-      entityId: sessionId,
-      action: 'REPLACE_SESSION_VEHICLES',
-      description: 'Session vehicles replaced',
-      performedBy: performedBy,
-    );
+      await _touchSession(sessionId);
 
-    await _enqueueSync(
-      entityType: 'FIELD_SESSION',
-      entityId: sessionId,
-      operation: 'UPDATE',
+      await _insertAuditEvent(
+        entityType: 'FIELD_SESSION',
+        entityId: sessionId,
+        action: 'REPLACE_SESSION_VEHICLES',
+        description: 'Session vehicles replaced',
+        performedBy: performedBy,
+      );
+
+      await _enqueueSync(
+        entityType: 'FIELD_SESSION',
+        entityId: sessionId,
+        operation: 'UPDATE',
       );
     });
   }
 
-
   Future<List<SessionVehicleWithVehicle>> getSessionVehicles(
     String sessionId,
   ) async {
-    final query = select(sessionVehicles).join([
+    final query = select(db.sessionVehicles).join([
       innerJoin(
-        vehicles,
-        vehicles.id.equalsExp(sessionVehicles.vehicleId),
+        db.vehicles,
+        db.vehicles.id.equalsExp(db.sessionVehicles.vehicleId),
       ),
     ])
-      ..where(sessionVehicles.sessionId.equals(sessionId))
+      ..where(db.sessionVehicles.sessionId.equals(sessionId))
       ..orderBy([
-        OrderingTerm.asc(vehicles.name),
+        OrderingTerm.asc(db.vehicles.name),
       ]);
 
     final rows = await query.get();
 
     return rows.map((row) {
       return SessionVehicleWithVehicle(
-        sessionVehicle: row.readTable(sessionVehicles),
-        vehicle: row.readTable(vehicles),
+        sessionVehicle: row.readTable(db.sessionVehicles),
+        vehicle: row.readTable(db.vehicles),
       );
     }).toList();
   }
 
   Future<int> countSessionVehicles(String sessionId) async {
-    final countExp = sessionVehicles.id.count();
+    final countExp = db.sessionVehicles.id.count();
 
-    final query = selectOnly(sessionVehicles)
+    final query = selectOnly(db.sessionVehicles)
       ..addColumns([countExp])
-      ..where(sessionVehicles.sessionId.equals(sessionId));
+      ..where(db.sessionVehicles.sessionId.equals(sessionId));
 
     final row = await query.getSingle();
 
     return row.read(countExp) ?? 0;
   }
 
-  Future<int> countSortiesForSession (String sessionId) async{
-    final countExp = sorties.flightId.count();
+  Future<int> countSortiesForSession(String sessionId) async {
+    final countExp = db.sorties.flightId.count();
 
     final query = selectOnly(db.sorties)
-          ..addColumns([countExp])
-          ..where(sorties.sessionId.equals(sessionId));
-        
+      ..addColumns([countExp])
+      ..where(db.sorties.sessionId.equals(sessionId));
+
     final row = await query.getSingle();
 
     return row.read(countExp) ?? 0;
   }
 
   Future<int> countSortiesForSessionVehicle(String sessionVehicleId) async {
-    final countExp = sorties.flightId.count();
+    final countExp = db.sorties.flightId.count();
 
-    final query = selectOnly(sorties)
+    final query = selectOnly(db.sorties)
       ..addColumns([countExp])
-      ..where(sorties.sessionVehicleId.equals(sessionVehicleId));
+      ..where(db.sorties.sessionVehicleId.equals(sessionVehicleId));
 
     final row = await query.getSingle();
 
     return row.read(countExp) ?? 0;
   }
 
-Future<void> addPayloadToSessionVehicle({
-    required String id,
+
+  Future<String> addPayloadToSessionVehicle({
     required String sessionVehicleId,
     required String payloadId,
     required String performedBy,
   }) async {
-    final sessionVehicle = await (select(sessionVehicles)
-          ..where((v) => v.id.equals(sessionVehicleId)))
+    final sessionVehicle = await _requireSessionVehicle(sessionVehicleId);
+    await _requirePayload(payloadId);
+
+    final existing = await (select(db.sessionVehiclePayload)
+          ..where(
+            (v) =>
+                v.sessionVehicleId.equals(sessionVehicleId) &
+                v.payloadId.equals(payloadId),
+          ))
         .getSingleOrNull();
 
-    if (sessionVehicle == null) {
-      throw Exception('Session vehicle not found: $sessionVehicleId');
+    if (existing != null) {
+      return existing.id;
     }
 
+    final id = _uuid.v4();
+
     await transaction(() async {
-      await into(sessionVehiclePayload).insert(
+      await into(db.sessionVehiclePayload).insert(
         SessionVehiclePayloadCompanion.insert(
           id: id,
           sessionVehicleId: sessionVehicleId,
@@ -579,44 +637,50 @@ Future<void> addPayloadToSessionVehicle({
         operation: 'INSERT',
       );
     });
+
+    return id;
   }
 
-Future<void> removePayloadFromSessionVehicle({
+  Future<void> removePayloadFromSessionVehicle({
     required String sessionVehicleId,
     required String payloadId,
     required String performedBy,
   }) async {
-    final sessionVehicle = await (select(sessionVehicles)
-          ..where((v) => v.id.equals(sessionVehicleId)))
+    final sessionVehicle = await _requireSessionVehicle(sessionVehicleId);
+
+    final payloadAssignment = await (select(db.sessionVehiclePayload)
+          ..where(
+            (v) =>
+                v.sessionVehicleId.equals(sessionVehicleId) &
+                v.payloadId.equals(payloadId),
+          ))
         .getSingleOrNull();
 
-    if (sessionVehicle == null) {
-      throw Exception('Session vehicle not found: $sessionVehicleId');
+    if (payloadAssignment == null) {
+      throw Exception(
+        'Payload $payloadId is not assigned to session vehicle $sessionVehicleId.',
+      );
     }
 
     await transaction(() async {
-      await (delete(sessionVehiclePayload)
-            ..where(
-              (v) =>
-                  v.sessionVehicleId.equals(sessionVehicleId) &
-                  v.payloadId.equals(payloadId),
-            ))
+      await (delete(db.sessionVehiclePayload)
+            ..where((v) => v.id.equals(payloadAssignment.id)))
           .go();
 
       await _touchSession(sessionVehicle.sessionId);
 
       await _insertAuditEvent(
-        entityType: 'SESSION_VEHICLE',
-        entityId: sessionVehicleId,
-        action: 'REMOVE_PAYLOAD',
+        entityType: 'SESSION_VEHICLE_PAYLOAD',
+        entityId: payloadAssignment.id,
+        action: 'DELETE',
         description: 'Payload removed from session vehicle: $payloadId',
         performedBy: performedBy,
       );
 
       await _enqueueSync(
-        entityType: 'SESSION_VEHICLE',
-        entityId: sessionVehicleId,
-        operation: 'UPDATE',
+        entityType: 'SESSION_VEHICLE_PAYLOAD',
+        entityId: payloadAssignment.id,
+        operation: 'DELETE',
       );
     });
   }
@@ -626,21 +690,17 @@ Future<void> removePayloadFromSessionVehicle({
     required List<String> payloadIds,
     required String performedBy,
   }) async {
-    final sessionVehicle = await (select(sessionVehicles)
-          ..where((v) => v.id.equals(sessionVehicleId)))
-        .getSingleOrNull();
-
-    if (sessionVehicle == null) {
-      throw Exception('Session vehicle not found: $sessionVehicleId');
-    }
+    final sessionVehicle = await _requireSessionVehicle(sessionVehicleId);
 
     await transaction(() async {
-      await (delete(sessionVehiclePayload)
+      await (delete(db.sessionVehiclePayload)
             ..where((v) => v.sessionVehicleId.equals(sessionVehicleId)))
           .go();
 
       for (final payloadId in payloadIds.toSet()) {
-        await into(sessionVehiclePayload).insert(
+        await _requirePayload(payloadId);
+
+        await into(db.sessionVehiclePayload).insert(
           SessionVehiclePayloadCompanion.insert(
             id: _uuid.v4(),
             sessionVehicleId: sessionVehicleId,
@@ -666,7 +726,7 @@ Future<void> removePayloadFromSessionVehicle({
       );
     });
   }
-  
+
   Future<List<Payload>> getPayloadsForSessionVehicle (String sessionVehicleId) async {
     final query = select(db.sessionVehiclePayload).join([
       innerJoin(
@@ -674,81 +734,111 @@ Future<void> removePayloadFromSessionVehicle({
         db.payloads.payloadId.equalsExp(db.sessionVehiclePayload.payloadId),
       ),
     ])
-    ..where(db.sessionVehiclePayload.sessionVehicleId.equals(sessionVehicleId))
-    ..orderBy([
-      OrderingTerm.asc(payloads.name)
-    ]);
+      ..where(db.sessionVehiclePayload.sessionVehicleId.equals(sessionVehicleId))
+      ..orderBy([
+        OrderingTerm.asc(db.payloads.name),
+      ]);
 
     final rows = await query.get();
+
     return rows.map((row) => row.readTable(db.payloads)).toList();
   }
 
   Future<int> countPayloadsForSessionVehicle(String sessionVehicleId) async {
-    final countExp = sessionVehiclePayload.id.count();
+    final countExp = db.sessionVehiclePayload.id.count();
 
     final query = selectOnly(db.sessionVehiclePayload)
-          ..addColumns([countExp])
-          ..where(sessionVehiclePayload.sessionVehicleId.equals(sessionVehicleId));
-    
-    final rows = await query.getSingle();
-    return rows.read(countExp) ?? 0;
+      ..addColumns([countExp])
+      ..where(db.sessionVehiclePayload.sessionVehicleId.equals(sessionVehicleId));
+
+    final row = await query.getSingle();
+
+    return row.read(countExp) ?? 0;
   }
 
-  Future<List<PayloadCompatibilityIssue>> getPayloadCompatibilityIssues (String sessionVehicleId) async {
-    final sessionVehicle = await (select(sessionVehicles)
-          ..where((v) => v.id.equals(sessionVehicleId)))
-        .getSingleOrNull();
-
-    if (sessionVehicle == null) {
-      throw Exception('Session vehicle not found: $sessionVehicleId');
-    }
-
-    final vehicle = await (select(vehicles)
-          ..where((v) => v.id.equals(sessionVehicle.vehicleId)))
-        .getSingleOrNull();
-
-    if (vehicle == null) {
-      throw Exception('Vehicle not found: ${sessionVehicle.vehicleId}');
-    }
+  Future<List<PayloadCompatibilityIssue>>
+      getPayloadCompatibilityIssuesForSessionVehicle(
+    String sessionVehicleId,
+  ) async {
+    final sessionVehicle = await _requireSessionVehicle(sessionVehicleId);
+    final vehicle = await _requireVehicle(sessionVehicle.vehicleId);
     final selectedPayloads = await getPayloadsForSessionVehicle(sessionVehicleId);
 
-    final issues = <PayloadCompatibilityIssue> [];
+    final issues = <PayloadCompatibilityIssue>[];
 
     for (final payload in selectedPayloads) {
       final compatibilityRows = await (select(db.payloadVehicleCompatibility)
-                            ..where((v) => v.payloadId.equals(payload.payloadId)))
-                            .get();
+            ..where((v) => v.payloadId.equals(payload.payloadId)))
+          .get();
+
       if (compatibilityRows.isEmpty) continue;
 
       final isCompatible = compatibilityRows.any(
         (row) => row.vehicleType == vehicle.type,
       );
 
-      if(!isCompatible){
+      if (!isCompatible) {
         issues.add(
           PayloadCompatibilityIssue(
-            vehicleId: vehicle.id, 
-            sessionVehicleId: sessionVehicleId, 
-            vehicleName: vehicle.name, 
-            vehicleType: vehicle.type, 
-            payloadId: payload.payloadId, 
-            payloadName: payload.name, 
-            message: 'Payload ${payload.name} is not marked compatible with ${vehicle.type}',
+            vehicleId: vehicle.id,
+            sessionVehicleId: sessionVehicleId,
+            vehicleName: vehicle.name,
+            vehicleType: vehicle.type,
+            payloadId: payload.payloadId,
+            payloadName: payload.name,
+            message:
+                'Payload ${payload.name} is not marked compatible with ${vehicle.type}',
           ),
         );
       }
     }
+
     return issues;
   }
 
-Future<void> addBatteryToSession({
-    required String id,
+  Future<List<PayloadCompatibilityIssue>> getPayloadCompatibilityIssues(
+    String sessionId,
+  ) async {
+    await _requireFieldSession(sessionId);
+
+    final sessionVehicleList = await getSessionVehicles(sessionId);
+    final issues = <PayloadCompatibilityIssue>[];
+
+    for (final item in sessionVehicleList) {
+      final vehicleIssues =
+          await getPayloadCompatibilityIssuesForSessionVehicle(
+        item.sessionVehicle.id,
+      );
+
+      issues.addAll(vehicleIssues);
+    }
+
+    return issues;
+  }
+
+  Future<String> addBatteryToSession({
     required String sessionId,
     required String batteryId,
     required String performedBy,
   }) async {
+    await _requireFieldSession(sessionId);
+    await _requireBattery(batteryId);
+
+    final existing = await (select(db.sessionBatteries)
+          ..where(
+            (v) =>
+                v.sessionId.equals(sessionId) & v.batteryId.equals(batteryId),
+          ))
+        .getSingleOrNull();
+
+    if (existing != null) {
+      return existing.id;
+    }
+
+    final id = _uuid.v4();
+
     await transaction(() async {
-      await into(sessionBatteries).insert(
+      await into(db.sessionBatteries).insert(
         SessionBatteriesCompanion.insert(
           id: id,
           sessionId: sessionId,
@@ -772,56 +862,69 @@ Future<void> addBatteryToSession({
         operation: 'INSERT',
       );
     });
+
+    return id;
   }
 
   Future<void> removeBatteryFromSession({
-    required String sessionId,
-    required String batteryId,
+    required String sessionBatteryId,
     required String performedBy,
   }) async {
+    final sessionBattery = await (select(db.sessionBatteries)
+          ..where((v) => v.id.equals(sessionBatteryId)))
+        .getSingleOrNull();
+
+    if (sessionBattery == null) {
+      throw Exception('Session battery not found: $sessionBatteryId');
+    }
+
     await transaction(() async {
-      await (delete(sessionBatteries)
-            ..where(
-              (v) =>
-                  v.sessionId.equals(sessionId) &
-                  v.batteryId.equals(batteryId),
-            ))
+      await (delete(db.sessionBatteries)
+            ..where((v) => v.id.equals(sessionBatteryId)))
           .go();
 
-      await _touchSession(sessionId);
+      await _touchSession(sessionBattery.sessionId);
 
       await _insertAuditEvent(
-        entityType: 'FIELD_SESSION',
-        entityId: sessionId,
-        action: 'REMOVE_BATTERY',
-        description: 'Battery removed from session: $batteryId',
+        entityType: 'SESSION_BATTERY',
+        entityId: sessionBatteryId,
+        action: 'DELETE',
+        description: 'Battery removed from session',
         performedBy: performedBy,
       );
 
       await _enqueueSync(
-        entityType: 'FIELD_SESSION',
-        entityId: sessionId,
-        operation: 'UPDATE',
+        entityType: 'SESSION_BATTERY',
+        entityId: sessionBatteryId,
+        operation: 'DELETE',
       );
     });
   }
 
   Future<void> replaceSessionBatteries({
     required String sessionId,
-    required List<String> batteryIds,
+    required List<SessionBatteryDraft> batteries,
     required String performedBy,
   }) async {
+    await _requireFieldSession(sessionId);
+
     await transaction(() async {
-      await (delete(sessionBatteries)
+      await (delete(db.sessionBatteries)
             ..where((v) => v.sessionId.equals(sessionId)))
           .go();
 
-      for (final batteryId in batteryIds.toSet()) {
-        await into(sessionBatteries).insert(
+      final seenBatteryIds = <String>{};
+
+      for (final battery in batteries) {
+        if (!seenBatteryIds.add(battery.batteryId)) continue;
+
+        await _requireBattery(battery.batteryId);
+
+        await into(db.sessionBatteries).insert(
           SessionBatteriesCompanion.insert(
             id: _uuid.v4(),
             sessionId: sessionId,
-            batteryId: batteryId,
+            batteryId: battery.batteryId,
           ),
         );
       }
@@ -847,29 +950,29 @@ Future<void> addBatteryToSession({
   Future<List<SessionBatteryWithBattery>> getSessionBatteries(
     String sessionId,
   ) async {
-    final query = select(sessionBatteries).join([
+    final query = select(db.sessionBatteries).join([
       innerJoin(
-        batteries,
-        batteries.batteryId.equalsExp(sessionBatteries.batteryId),
+        db.batteries,
+        db.batteries.batteryId.equalsExp(db.sessionBatteries.batteryId),
       ),
     ])
-      ..where(sessionBatteries.sessionId.equals(sessionId))
+      ..where(db.sessionBatteries.sessionId.equals(sessionId))
       ..orderBy([
-        OrderingTerm.asc(batteries.batteryId),
+        OrderingTerm.asc(db.batteries.batteryId),
       ]);
 
     final rows = await query.get();
 
     return rows.map((row) {
       return SessionBatteryWithBattery(
-        sessionBattery: row.readTable(sessionBatteries),
-        battery: row.readTable(batteries),
+        sessionBattery: row.readTable(db.sessionBatteries),
+        battery: row.readTable(db.batteries),
       );
     }).toList();
   }
 
   Future<List<EquipmentList>> getActiveEquipmentList() {
-    return (select(equipmentLists)
+    return (select(db.equipmentLists)
           ..where((v) => v.isActive.equals(true))
           ..orderBy([
             (v) => OrderingTerm.asc(v.category),
@@ -878,22 +981,33 @@ Future<void> addBatteryToSession({
         .get();
   }
 
-Future<void> createEquipmentChecksForSession({
+  Future<void> createEquipmentChecksForSession({
     required String sessionId,
     required String checkedBy,
   }) async {
+    await _requireFieldSession(sessionId);
+
     final activeEquipment = await getActiveEquipmentList();
+
+    final existingChecks = await (select(db.sessionEquipmentChecks)
+          ..where((v) => v.sessionId.equals(sessionId)))
+        .get();
+
+    final existingEquipmentIds =
+        existingChecks.map((item) => item.equipmentId).toSet();
 
     await transaction(() async {
       for (final item in activeEquipment) {
-        await into(sessionEquipmentChecks).insert(
+        if (existingEquipmentIds.contains(item.id)) continue;
+
+        await into(db.sessionEquipmentChecks).insert(
           SessionEquipmentChecksCompanion.insert(
             id: _uuid.v4(),
             sessionId: sessionId,
             equipmentId: item.id,
             checkedBy: checkedBy,
           ),
-          );
+        );
       }
 
       await _touchSession(sessionId);
@@ -915,42 +1029,47 @@ Future<void> createEquipmentChecksForSession({
   }
 
   Future<void> updateEquipmentCheck({
-    required String sessionId,
-    required String equipmentId,
+    required String equipmentCheckId,
     required bool isPacked,
     String? notes,
     required String checkedBy,
   }) async {
+    final equipmentCheck = await (select(db.sessionEquipmentChecks)
+          ..where((v) => v.id.equals(equipmentCheckId)))
+        .getSingleOrNull();
+
+    if (equipmentCheck == null) {
+      throw Exception('Equipment check not found: $equipmentCheckId');
+    }
+
+    final now = DateTime.now();
+
     await transaction(() async {
-      await (update(sessionEquipmentChecks)
-            ..where(
-              (v) =>
-                  v.sessionId.equals(sessionId) &
-                  v.equipmentId.equals(equipmentId),
-            ))
+      await (update(db.sessionEquipmentChecks)
+            ..where((v) => v.id.equals(equipmentCheckId)))
           .write(
         SessionEquipmentChecksCompanion(
           isPacked: Value(isPacked),
           notes: notes == null ? const Value.absent() : Value(notes),
-          checkedAt: Value(DateTime.now()),
+          checkedAt: Value(now),
           checkedBy: Value(checkedBy),
-          updatedAt: Value(DateTime.now()),
+          updatedAt: Value(now),
         ),
       );
 
-      await _touchSession(sessionId);
+      await _touchSession(equipmentCheck.sessionId);
 
       await _insertAuditEvent(
-        entityType: 'FIELD_SESSION',
-        entityId: sessionId,
-        action: 'UPDATE_EQUIPMENT_CHECK',
-        description: 'Equipment check updated: $equipmentId',
+        entityType: 'SESSION_EQUIPMENT_CHECK',
+        entityId: equipmentCheckId,
+        action: 'UPDATE',
+        description: 'Equipment check updated',
         performedBy: checkedBy,
       );
 
       await _enqueueSync(
-        entityType: 'FIELD_SESSION',
-        entityId: sessionId,
+        entityType: 'SESSION_EQUIPMENT_CHECK',
+        entityId: equipmentCheckId,
         operation: 'UPDATE',
       );
     });
@@ -959,41 +1078,63 @@ Future<void> createEquipmentChecksForSession({
   Future<List<SessionEquipmentCheckWithItem>> getSessionEquipmentChecks(
     String sessionId,
   ) async {
-    final query = select(sessionEquipmentChecks).join([
+    final query = select(db.sessionEquipmentChecks).join([
       innerJoin(
-        equipmentLists,
-        equipmentLists.id.equalsExp(sessionEquipmentChecks.equipmentId),
+        db.equipmentLists,
+        db.equipmentLists.id.equalsExp(db.sessionEquipmentChecks.equipmentId),
       ),
     ])
-      ..where(sessionEquipmentChecks.sessionId.equals(sessionId))
+      ..where(db.sessionEquipmentChecks.sessionId.equals(sessionId))
       ..orderBy([
-        OrderingTerm.asc(equipmentLists.category),
-        OrderingTerm.asc(equipmentLists.name),
+        OrderingTerm.asc(db.equipmentLists.category),
+        OrderingTerm.asc(db.equipmentLists.name),
       ]);
 
     final rows = await query.get();
 
     return rows.map((row) {
       return SessionEquipmentCheckWithItem(
-        sessionEquipmentCheck: row.readTable(sessionEquipmentChecks),
-        equipmentList: row.readTable(equipmentLists),
+        sessionEquipmentCheck: row.readTable(db.sessionEquipmentChecks),
+        equipmentList: row.readTable(db.equipmentLists),
       );
     }).toList();
   }
 
-  Future<void> addCustomEquipmentCheckToSession ({
-    required String sessionCheckId,
-    required String equipmentId,
+  Future<String> addCustomEquipmentCheckToSession({
     required String sessionId,
+    required String equipmentId,
+    required bool isPacked,
+    String? notes,
     required String checkedBy,
   }) async {
+    await _requireFieldSession(sessionId);
+    await _requireEquipmentItem(equipmentId);
+
+    final existing = await (select(db.sessionEquipmentChecks)
+          ..where(
+            (v) =>
+                v.sessionId.equals(sessionId) &
+                v.equipmentId.equals(equipmentId),
+          ))
+        .getSingleOrNull();
+
+    if (existing != null) {
+      return existing.id;
+    }
+
+    final id = _uuid.v4();
+    final now = DateTime.now();
+
     await transaction(() async {
-      await into(sessionEquipmentChecks).insert(
+      await into(db.sessionEquipmentChecks).insert(
         SessionEquipmentChecksCompanion.insert(
-          id: sessionCheckId,
+          id: id,
           sessionId: sessionId,
           equipmentId: equipmentId,
           checkedBy: checkedBy,
+          isPacked: Value(isPacked),
+          notes: Value(notes),
+          checkedAt: Value(now),
         ),
       );
 
@@ -1001,7 +1142,7 @@ Future<void> createEquipmentChecksForSession({
 
       await _insertAuditEvent(
         entityType: 'SESSION_EQUIPMENT_CHECK',
-        entityId: sessionCheckId,
+        entityId: id,
         action: 'CREATE',
         description: 'Custom equipment check added to session',
         performedBy: checkedBy,
@@ -1009,20 +1150,22 @@ Future<void> createEquipmentChecksForSession({
 
       await _enqueueSync(
         entityType: 'SESSION_EQUIPMENT_CHECK',
-        entityId: sessionCheckId,
+        entityId: id,
         operation: 'INSERT',
       );
     });
+
+    return id;
   }
 
   Future<int> countUnpackedEquipmentChecks(String sessionId) async {
-    final countExp = sessionEquipmentChecks.id.count();
+    final countExp = db.sessionEquipmentChecks.id.count();
 
-    final query = selectOnly(sessionEquipmentChecks)
+    final query = selectOnly(db.sessionEquipmentChecks)
       ..addColumns([countExp])
       ..where(
-        sessionEquipmentChecks.sessionId.equals(sessionId) &
-            sessionEquipmentChecks.isPacked.equals(false),
+        db.sessionEquipmentChecks.sessionId.equals(sessionId) &
+            db.sessionEquipmentChecks.isPacked.equals(false),
       );
 
     final row = await query.getSingle();
@@ -1030,16 +1173,18 @@ Future<void> createEquipmentChecksForSession({
     return row.read(countExp) ?? 0;
   }
 
-  Future<void> createEquipmentItem({
-    required String id,
+  Future<String> createEquipmentItem({
+    String? id,
     required String name,
     required String category,
     required String performedBy,
   }) async {
+    final resolvedId = id ?? _uuid.v4();
+
     await transaction(() async {
-      await into(equipmentLists).insert(
+      await into(db.equipmentLists).insert(
         EquipmentListsCompanion.insert(
-          id: id,
+          id: resolvedId,
           name: name,
           category: category,
         ),
@@ -1047,7 +1192,7 @@ Future<void> createEquipmentChecksForSession({
 
       await _insertAuditEvent(
         entityType: 'EQUIPMENT_ITEM',
-        entityId: id,
+        entityId: resolvedId,
         action: 'CREATE',
         description: 'Equipment item created',
         performedBy: performedBy,
@@ -1055,21 +1200,26 @@ Future<void> createEquipmentChecksForSession({
 
       await _enqueueSync(
         entityType: 'EQUIPMENT_ITEM',
-        entityId: id,
+        entityId: resolvedId,
         operation: 'INSERT',
       );
     });
+
+    return resolvedId;
   }
 
   Future<void> updateEquipmentItem({
-    required String id,
+    required String equipmentId,
     String? name,
     String? category,
     bool? isActive,
     required String performedBy,
   }) async {
+    await _requireEquipmentItem(equipmentId);
+
     await transaction(() async {
-      await (update(equipmentLists)..where((v) => v.id.equals(id))).write(
+      await (update(db.equipmentLists)..where((v) => v.id.equals(equipmentId)))
+          .write(
         EquipmentListsCompanion(
           name: name == null ? const Value.absent() : Value(name),
           category: category == null ? const Value.absent() : Value(category),
@@ -1079,7 +1229,7 @@ Future<void> createEquipmentChecksForSession({
 
       await _insertAuditEvent(
         entityType: 'EQUIPMENT_ITEM',
-        entityId: id,
+        entityId: equipmentId,
         action: 'UPDATE',
         description: 'Equipment item updated',
         performedBy: performedBy,
@@ -1087,22 +1237,23 @@ Future<void> createEquipmentChecksForSession({
 
       await _enqueueSync(
         entityType: 'EQUIPMENT_ITEM',
-        entityId: id,
+        entityId: equipmentId,
         operation: 'UPDATE',
       );
     });
   }
 
   Future<void> deactivateEquipmentItem({
-    required String id,
+    required String equipmentId,
     required String performedBy,
-  }) async {
-    await updateEquipmentItem(
-      id: id,
+  }) {
+    return updateEquipmentItem(
+      equipmentId: equipmentId,
       isActive: false,
       performedBy: performedBy,
     );
   }
+
 
   Future<PreFieldSummaryData> getPreFieldSummary (String sessionId) async {
     final session = await getFieldSessionById(sessionId);
@@ -1115,21 +1266,99 @@ Future<void> createEquipmentChecksForSession({
     final sessionVehicleList = await getSessionVehicles(sessionId);
     final batteriesList = await getSessionBatteries(sessionId);
     final equipmentChecks = await getSessionEquipmentChecks(sessionId);
-
-    final issue = <PayloadCompatibilityIssue>[];
-
-    for (final item in sessionVehicleList){
-      final vehicleIssues = await getPayloadCompatibilityIssues(item.sessionVehicle.id);
-      issue.addAll(vehicleIssues);
-    }
+    final issues = await getPayloadCompatibilityIssues(sessionId);
 
     return PreFieldSummaryData(
-      session: session, 
-      teamMembers: teamMembers, 
-      vehicles: sessionVehicleList, 
-      batteries: batteriesList, 
-      equipmentChecks: equipmentChecks, 
-      payloadCompatibilityIssues: issue);
+      session: session,
+      teamMembers: teamMembers,
+      vehicles: sessionVehicleList,
+      batteries: batteriesList,
+      equipmentChecks: equipmentChecks,
+      payloadCompatibilityIssues: issues,
+    );
+  }
+
+  Future<FieldSession> _requireFieldSession(String sessionId) async {
+    final session = await getFieldSessionById(sessionId);
+
+    if (session == null) {
+      throw Exception('Field session not found: $sessionId');
+    }
+
+    return session;
+  }
+
+  Future<User> _requireUser(String userId) async {
+    final user = await (select(db.users)..where((v) => v.id.equals(userId)))
+        .getSingleOrNull();
+
+    if (user == null) {
+      throw Exception('User not found: $userId');
+    }
+
+    return user;
+  }
+
+  Future<Vehicle> _requireVehicle(String vehicleId) async {
+    final vehicle = await (select(db.vehicles)
+          ..where((v) => v.id.equals(vehicleId)))
+        .getSingleOrNull();
+
+    if (vehicle == null) {
+      throw Exception('Vehicle not found: $vehicleId');
+    }
+
+    return vehicle;
+  }
+
+  Future<Payload> _requirePayload(String payloadId) async {
+    final payload = await (select(db.payloads)
+          ..where((v) => v.payloadId.equals(payloadId)))
+        .getSingleOrNull();
+
+    if (payload == null) {
+      throw Exception('Payload not found: $payloadId');
+    }
+
+    return payload;
+  }
+
+  Future<Battery> _requireBattery(String batteryId) async {
+    final battery = await (select(db.batteries)
+          ..where((v) => v.batteryId.equals(batteryId)))
+        .getSingleOrNull();
+
+    if (battery == null) {
+      throw Exception('Battery not found: $batteryId');
+    }
+
+    return battery;
+  }
+
+  Future<EquipmentList> _requireEquipmentItem(String equipmentId) async {
+    final equipment = await (select(db.equipmentLists)
+          ..where((v) => v.id.equals(equipmentId)))
+        .getSingleOrNull();
+
+    if (equipment == null) {
+      throw Exception('Equipment item not found: $equipmentId');
+    }
+
+    return equipment;
+  }
+
+  Future<SessionVehicle> _requireSessionVehicle(
+    String sessionVehicleId,
+  ) async {
+    final sessionVehicle = await (select(db.sessionVehicles)
+          ..where((v) => v.id.equals(sessionVehicleId)))
+        .getSingleOrNull();
+
+    if (sessionVehicle == null) {
+      throw Exception('Session vehicle not found: $sessionVehicleId');
+    }
+
+    return sessionVehicle;
   }
 
   Future<void> _insertAuditEvent({
@@ -1139,7 +1368,7 @@ Future<void> createEquipmentChecksForSession({
     String? description,
     required String performedBy,
   }) {
-    return into(auditEvents).insert(
+    return into(db.auditEvents).insert(
       AuditEventsCompanion.insert(
         entityType: entityType,
         entityId: entityId,
@@ -1155,7 +1384,7 @@ Future<void> createEquipmentChecksForSession({
     required String entityId,
     required String operation,
   }) {
-    return into(syncQueue).insert(
+    return into(db.syncQueue).insert(
       SyncQueueCompanion.insert(
         entityType: entityType,
         entityId: entityId,
@@ -1166,7 +1395,7 @@ Future<void> createEquipmentChecksForSession({
   }
 
   Future<void> _touchSession(String sessionId) {
-    return (update(fieldSessions)
+    return (update(db.fieldSessions)
           ..where((v) => v.sessionId.equals(sessionId)))
         .write(
       FieldSessionsCompanion(

@@ -4,6 +4,7 @@ class PayloadEntity {
   final String category;
   final String? storageType;
   final String? storageCapacity;
+  final String status;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -11,6 +12,7 @@ class PayloadEntity {
     required this.payloadId,
     required this.name,
     required this.category,
+    required this.status,
     this.storageType,
     this.storageCapacity,
     required this.createdAt,

@@ -40,11 +40,19 @@ class RecordRepositoryImpl implements RecordRepository {
   Future<List<FieldSessionEntity>> searchSessions({
     required String query,
     String? status,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String? vehicleId,
+    String? picUserId,
     int limit = 50,
   }) async {
     final sessions = await _dao.searchSessions(
       query: query,
       status: status,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+      vehicleId: vehicleId,
+      picUserId: picUserId,
       limit: limit,
     );
     return sessions.map((session) => session.toEntity()).toList();
@@ -245,5 +253,85 @@ class RecordRepositoryImpl implements RecordRepository {
   ) async {
     final exports = await _dao.getExportsForSession(sessionId);
     return exports.map((export) => export.toRecordSummaryEntity()).toList();
+  }
+
+  @override
+  Future<SessionRecordViewEntity> getSessionRecordView(String sessionId) async {
+    final session = await getSessionById(sessionId);
+
+    if (session == null) {
+      throw Exception('Session not found: $sessionId');
+    }
+
+    final sessionUsers = await getSessionUsers(sessionId);
+    final sessionVehicles = await getSessionVehicles(sessionId);
+    final sessionBatteries = await getSessionBatteries(sessionId);
+    final equipmentChecks = await getSessionEquipmentChecks(sessionId);
+    final sorties = await getSortiesForSession(sessionId);
+
+    final sortieUsersByFlightId = <String, List<SortieUserWithUserEntity>>{};
+    final sortiePayloadsByFlightId =
+        <String, List<SortiePayloadWithPayloadEntity>>{};
+    final sortieBatteriesByFlightId =
+        <String, List<SortieBatteryWithBatteryEntity>>{};
+    final checklistResponsesByFlightId =
+        <String, List<ChecklistResponseWithItemEntity>>{};
+    final overridesByFlightId = <String, List<ChecklistOverrideEntity>>{};
+    final postFlightNotesByFlightId = <String, PostFlightNoteEntity?>{};
+
+    for (final sortie in sorties) {
+      sortieUsersByFlightId[sortie.flightId] =
+          await getSortieUsers(sortie.flightId);
+      sortiePayloadsByFlightId[sortie.flightId] =
+          await getSortiePayloads(sortie.flightId);
+      sortieBatteriesByFlightId[sortie.flightId] =
+          await getSortieBatteries(sortie.flightId);
+      checklistResponsesByFlightId[sortie.flightId] =
+          await getChecklistResponsesForFlight(sortie.flightId);
+      overridesByFlightId[sortie.flightId] =
+          await getOverridesForFlight(sortie.flightId);
+      postFlightNotesByFlightId[sortie.flightId] =
+          await getPostFlightNoteForFlight(sortie.flightId);
+    }
+
+    return SessionRecordViewEntity(
+      session: session,
+      sessionUsers: sessionUsers,
+      sessionVehicles: sessionVehicles,
+      sessionBatteries: sessionBatteries,
+      equipmentChecks: equipmentChecks,
+      sorties: sorties,
+      sortieUsersByFlightId: sortieUsersByFlightId,
+      sortiePayloadsByFlightId: sortiePayloadsByFlightId,
+      sortieBatteriesByFlightId: sortieBatteriesByFlightId,
+      checklistResponsesByFlightId: checklistResponsesByFlightId,
+      overridesByFlightId: overridesByFlightId,
+      postFlightNotesByFlightId: postFlightNotesByFlightId,
+      auditTrail: await getAuditTrailForSession(sessionId),
+      amendments: await getAmendmentsForSession(sessionId),
+      exports: await getExportsForSession(sessionId),
+    );
+  }
+
+  @override
+  Future<List<SortieEntity>> getSortiesForVehicle({
+    required String vehicleId,
+    int limit = 50,
+  }) async {
+    final sorties = await _dao.getSortiesForVehicle(
+      vehicleId: vehicleId,
+      limit: limit,
+    );
+    return sorties.map((sortie) => sortie.toEntity()).toList();
+  }
+
+  @override
+  Future<int> countSortiesForVehicle(String vehicleId) {
+    return _dao.countSortiesForVehicle(vehicleId);
+  }
+
+  @override
+  Future<int> countSessionsForSite(String locationName) {
+    return _dao.countSessionsForSite(locationName);
   }
 }

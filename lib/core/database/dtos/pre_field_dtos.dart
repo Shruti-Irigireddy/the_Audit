@@ -25,6 +25,16 @@ class SessionVehicleDraft {
   });
 }
 
+class SessionBatteryDraft {
+  final String id;
+  final String batteryId;
+
+  const SessionBatteryDraft({
+    required this.id,
+    required this.batteryId,
+  });
+}
+
 class PayloadCompatibilityIssue {
   final String vehicleId;
   final String sessionVehicleId;

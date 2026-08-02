@@ -19,6 +19,10 @@ abstract class RecordRepository {
   Future<List<FieldSessionEntity>> searchSessions({
     required String query,
     String? status,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String? vehicleId,
+    String? picUserId,
     int limit = 50,
   });
 
@@ -101,4 +105,15 @@ abstract class RecordRepository {
   Future<List<ExportRecordSummaryEntity>> getExportsForSession(
     String sessionId,
   );
+
+  Future<SessionRecordViewEntity> getSessionRecordView(String sessionId);
+
+  Future<List<SortieEntity>> getSortiesForVehicle({
+    required String vehicleId,
+    int limit = 50,
+  });
+
+  Future<int> countSortiesForVehicle(String vehicleId);
+
+  Future<int> countSessionsForSite(String locationName);
 }

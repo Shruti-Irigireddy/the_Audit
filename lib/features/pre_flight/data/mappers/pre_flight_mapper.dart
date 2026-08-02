@@ -125,6 +125,7 @@ extension ChecklistResponseDbMapper on ChecklistResponse {
       valueNumber: valueNumber,
       notes: notes,
       createdBy: createdBy,
+      responseAt: responseAt,
       createdAt: createdAt,
       updatedAt: updatedAt
     );

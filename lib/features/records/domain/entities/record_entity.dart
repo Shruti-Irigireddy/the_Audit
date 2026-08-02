@@ -351,6 +351,7 @@ class ChecklistResponseWithItemEntity {
   final double? valueNumber;
   final String? notes;
   final String createdBy;
+  final DateTime responseAt;
   final DateTime createdAt;
   final DateTime updatedAt;
   final ChecklistItemRecordEntity item;
@@ -361,6 +362,7 @@ class ChecklistResponseWithItemEntity {
     required this.itemId,
     required this.response,
     required this.createdBy,
+    required this.responseAt,
     required this.createdAt,
     required this.updatedAt,
     required this.item,
@@ -495,5 +497,41 @@ class ExportRecordSummaryEntity {
     this.exportLocation,
     this.lastAttemptAt,
     this.errorMessage,
+  });
+}
+
+class SessionRecordViewEntity {
+  final FieldSessionEntity session;
+  final List<SessionUserWithUserEntity> sessionUsers;
+  final List<SessionVehicleWithVehicleEntity> sessionVehicles;
+  final List<SessionBatteryWithBatteryEntity> sessionBatteries;
+  final List<SessionEquipmentCheckWithItemEntity> equipmentChecks;
+  final List<SortieEntity> sorties;
+  final Map<String, List<SortieUserWithUserEntity>> sortieUsersByFlightId;
+  final Map<String, List<SortiePayloadWithPayloadEntity>> sortiePayloadsByFlightId;
+  final Map<String, List<SortieBatteryWithBatteryEntity>> sortieBatteriesByFlightId;
+  final Map<String, List<ChecklistResponseWithItemEntity>> checklistResponsesByFlightId;
+  final Map<String, List<ChecklistOverrideEntity>> overridesByFlightId;
+  final Map<String, PostFlightNoteEntity?> postFlightNotesByFlightId;
+  final List<AuditEventEntity> auditTrail;
+  final List<RecordAmendmentEntity> amendments;
+  final List<ExportRecordSummaryEntity> exports;
+
+  const SessionRecordViewEntity({
+    required this.session,
+    required this.sessionUsers,
+    required this.sessionVehicles,
+    required this.sessionBatteries,
+    required this.equipmentChecks,
+    required this.sorties,
+    required this.sortieUsersByFlightId,
+    required this.sortiePayloadsByFlightId,
+    required this.sortieBatteriesByFlightId,
+    required this.checklistResponsesByFlightId,
+    required this.overridesByFlightId,
+    required this.postFlightNotesByFlightId,
+    required this.auditTrail,
+    required this.amendments,
+    required this.exports,
   });
 }

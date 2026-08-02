@@ -4,6 +4,7 @@ class PayloadDraft {
   final String category;
   final String? storageType;
   final String? storageCapacity;
+  final String? status;
   final List<String> compatibleVehicleTypes;
 
   const PayloadDraft({
@@ -12,6 +13,7 @@ class PayloadDraft {
     required this.category,
     this.storageType,
     this.storageCapacity,
+    this.status,
     this.compatibleVehicleTypes = const [],
   });
 }
@@ -22,6 +24,7 @@ class PayloadUpdateDraft {
   final String? category;
   final String? storageType;
   final String? storageCapacity;
+  final String? status;
 
   const PayloadUpdateDraft({
     required this.payloadId,
@@ -29,6 +32,7 @@ class PayloadUpdateDraft {
     this.category,
     this.storageType,
     this.storageCapacity,
+    this.status,
   });
 }
 

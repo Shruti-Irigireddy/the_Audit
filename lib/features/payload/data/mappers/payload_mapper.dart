@@ -10,6 +10,7 @@ extension PayloadDbMapper on Payload {
       category: category,
       storageType: storageType,
       storageCapacity: storageCapacity,
+      status: status,
       createdAt: createdAt,
       updatedAt: updatedAt,
     );

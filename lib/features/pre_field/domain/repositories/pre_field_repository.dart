@@ -40,8 +40,7 @@ abstract class PreFieldRepository {
     required String closedBy,
   });
 
-  Future<void> addUserToSession({
-    required String id,
+  Future<String> addUserToSession({
     required String sessionId,
     required String userId,
     required String role,
@@ -66,8 +65,7 @@ abstract class PreFieldRepository {
     required String role,
   });
 
-  Future<void> addVehicleToSession({
-    required String id,
+  Future<String> addVehicleToSession({
     required String sessionId,
     required String vehicleId,
     String? objective,
@@ -99,15 +97,15 @@ abstract class PreFieldRepository {
 
   Future<int> countSortiesForSessionVehicle(String sessionVehicleId);
 
-  Future<void> addPayloadToSessionVehicle({
-    required String id,
+  Future<String> addPayloadToSessionVehicle({
     required String sessionVehicleId,
     required String payloadId,
     required String performedBy,
   });
 
   Future<void> removePayloadFromSessionVehicle({
-    required String sessionVehiclePayloadId,
+    required String sessionVehicleId,
+    required String payloadId,
     required String performedBy,
   });
 
@@ -127,8 +125,7 @@ abstract class PreFieldRepository {
     String sessionId,
   );
 
-  Future<void> addBatteryToSession({
-    required String id,
+  Future<String> addBatteryToSession({
     required String sessionId,
     required String batteryId,
     required String performedBy,
@@ -163,12 +160,9 @@ abstract class PreFieldRepository {
     required String checkedBy,
   });
 
-  Future<List<SessionEquipmentCheckWithItemEntity>> getSessionEquipmentChecks(
-    String sessionId,
-  );
+  Future<List<SessionEquipmentCheckWithItemEntity>> getSessionEquipmentChecks(String sessionId);
 
-  Future<void> addCustomEquipmentCheckToSession({
-    required String id,
+  Future<String> addCustomEquipmentCheckToSession({
     required String sessionId,
     required String equipmentId,
     required bool isPacked,

@@ -24,12 +24,17 @@ abstract class PreFlightRepository {
 
   Future<SortieEntity?> getSortieById(String flightId);
 
-  Future<List<SortieEntity?>> getSortiesForSession(String sessionId);
+  Future<List<SortieEntity>> getSortiesForSession(String sessionId);
 
   Future<PreFlightSetupEntity> getPreFlightSetup(String flightId);
 
-  Future<void> updateSortieBasicInfo(String flightId);
-  
+  Future<void> updateSortieBasicInfo({
+    required String flightId,
+    String? picUserId,
+    String? objective,
+    required String performedBy,
+  });
+
   Future<void> addUserToSortie({
     required String flightId,
     required String userId,
@@ -72,8 +77,7 @@ abstract class PreFlightRepository {
     required String performedBy,
   });
 
-  Future<SortiePayloadWithPayloadEntity> getSortiePayloads(String flightId);
-
+  Future<List<SortiePayloadWithPayloadEntity>> getSortiePayloads(String flightId);
 
   Future<List<BatteryEntity>> getSelectableBatteriesForSortie(String flightId);
 
@@ -85,9 +89,18 @@ abstract class PreFlightRepository {
     required String createdBy,
   });
 
-  Future<void> replaceSortieBatteries({
+  Future<void> replaceAllSortieBatteries({
     required String flightId,
     required List<SortieBatteryDraft> batteries,
+    required String performedBy,
+  });
+
+  Future<void> replaceSortieBattery({
+    required String flightId,
+    required String oldBatteryId,
+    required String newBatteryId,
+    double? voltageStart,
+    int? percentStart,
     required String performedBy,
   });
 
@@ -105,7 +118,7 @@ abstract class PreFlightRepository {
     required String performedBy,
   });
 
-  Future<SortieBatteryWithBatteryEntity> getSortieBatteries(String flightId);
+  Future<List<SortieBatteryWithBatteryEntity>> getSortieBatteries(String flightId);
 
   Future<BatteryStartDefaults?> getLatestBatteryEndStateAsStartDefault({
     required String batteryId,
@@ -141,12 +154,11 @@ abstract class PreFlightRepository {
   Future<void> createChecklistOverride ({
     required String flightId,
     required String itemId,
-    String? checklistResponseId,
     required String overriddenReason,
     required String overriddenBy,
   });
 
-  Future<ChecklistOverrideEntity> getOverridesForFlight(String flightId);
+  Future<List<ChecklistOverrideEntity>> getOverridesForFlight(String flightId);
 
   Future<void> submitGoNoGoDecision({
     required String flightId,

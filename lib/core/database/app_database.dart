@@ -167,6 +167,7 @@ part 'app_database.g.dart';
     TextColumn get category => text()(); // RGB/ Thermal, LiDAR, Multispectral, Hyperspectral, Mapping, Other
     TextColumn get storageType => text().nullable()();
     TextColumn get storageCapacity => text().nullable()(); // SD/ internal
+    TextColumn get status => text().withDefault(const Constant('ACTIVE'))();
     // Compatible vehicle Types - list of vehicleIds (multi-enum)
     DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
     DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
@@ -303,6 +304,7 @@ part 'app_database.g.dart';
     RealColumn get valueNumber => real().nullable()();
     TextColumn get notes => text().nullable()();
     TextColumn get createdBy => text().references(Users, #id)();
+    DateTimeColumn get responseAt => dateTime().withDefault(currentDateAndTime)();
     DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
     DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 
@@ -463,5 +465,18 @@ part 'app_database.g.dart';
           );
 
     @override
-    int get schemaVersion => 1;
+    int get schemaVersion => 2;
+
+    @override
+    MigrationStrategy get migration {
+      return MigrationStrategy(
+        onCreate: (m) => m.createAll(),
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            await m.addColumn(payloads, payloads.status);
+            await m.addColumn(checklistResponses, checklistResponses.responseAt);
+          }
+        },
+      );
+    }
   }

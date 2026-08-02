@@ -985,6 +985,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
             valueNumber: Value(valueNumber),
             notes: Value(notes),
             createdBy: createdBy,
+            responseAt: Value(DateTime.now()),
           ),
         );
       } else {
@@ -996,6 +997,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
             valueText: Value(valueText),
             valueNumber: Value(valueNumber),
             notes: Value(notes),
+            responseAt: Value(DateTime.now()),
             updatedAt: Value(DateTime.now()),
           ),
         );
@@ -1053,29 +1055,31 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
         if (existingResponse == null) {
           await into(db.checklistResponses).insert(
-            ChecklistResponsesCompanion.insert(
-              id: _uuid.v4(),
-              flightId: flightId,
-              itemId: response.itemId,
-              response: response.response,
-              valueText: Value(response.valueText),
-              valueNumber: Value(response.valueNumber),
-              notes: Value(response.notes),
-              createdBy: createdBy,
-            ),
-          );
-        } else {
+          ChecklistResponsesCompanion.insert(
+            id: _uuid.v4(),
+            flightId: flightId,
+            itemId: response.itemId,
+            response: response.response,
+            valueText: Value(response.valueText),
+            valueNumber: Value(response.valueNumber),
+            notes: Value(response.notes),
+            createdBy: createdBy,
+            responseAt: Value(now),
+          ),
+        );
+      } else {
           await (update(db.checklistResponses)
                 ..where((v) => v.id.equals(existingResponse.id)))
               .write(
             ChecklistResponsesCompanion(
               response: Value(response.response),
               valueText: Value(response.valueText),
-              valueNumber: Value(response.valueNumber),
-              notes: Value(response.notes),
-              updatedAt: Value(now),
-            ),
-          );
+            valueNumber: Value(response.valueNumber),
+            notes: Value(response.notes),
+            responseAt: Value(now),
+            updatedAt: Value(now),
+          ),
+        );
         }
 
         await _insertAuditEvent(

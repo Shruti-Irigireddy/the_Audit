@@ -9,21 +9,21 @@ import 'package:the_audit/features/pre_flight/domain/entities/sortie_payload_ent
 abstract class PostFlightRepository {
   Future<PostFlightSetupEntity> getPostFlightSetup(String flightId);
 
-  Future<PostFlightNoteEntity> getPostFlightNoteForFlight(String flightId);
+  Future<PostFlightNoteEntity?> getPostFlightNoteForFlight(String flightId);
 
   Future<List<SortieEntity>> getPostFlightPendingSorties({
-    String sessionId,
-    int limit
-    });
-
-  Future<List<SortieEntity>> getClosedSorties({
-    String sessionId,
+    String? sessionId,
     int limit
   });
 
-  Future<List<SortieBatteryEntity>> getSortieBatteries (String flightId);
+  Future<List<SortieEntity>> getClosedSorties({
+    String? sessionId,
+    int limit
+  });
 
-  Future<List<SortiePayloadEntity>> getSortiePayloads (String flightId);
+  Future<List<SortieBatteryWithBatteryEntity>> getSortieBatteries(String flightId);
+
+  Future<List<SortiePayloadWithPayloadEntity>> getSortiePayloads(String flightId);
 
   Future<void> savePostFlightNote({
     String? id,
@@ -31,12 +31,12 @@ abstract class PostFlightRepository {
     required String objectiveResult,
     String? objectiveNotes,
     String? missionRating,
-    String? issueEncountered,
+    String? issuesEncountered,
     String? logStoredAt,
     String? logLocation,
     String? logNotes,
-    String? flightDurationSeconds,
-    bool followUpRequired,
+    // String? flightDurationSeconds,
+    bool followUpRequired = false,
     String? followUpNotes,
     String? followUpAssignedTo,
     DateTime? followUpDueDate,
@@ -51,11 +51,13 @@ abstract class PostFlightRepository {
     String? objectiveNotes,
     required String performedBy,
   });
+
   Future<void> updateMissionRating({
     required String flightId,
-    String missionRating,
+    String? missionRating,
     required String performedBy
   });
+
   Future<void> updateLogDetails({
     required String flightId,
     String? logStoredAt,
@@ -66,7 +68,7 @@ abstract class PostFlightRepository {
 
   Future<void> updateIssuesEncountered({
     required String flightId,
-    String? issueEncountered,
+    String? issuesEncountered,
     String? notes,
     required String performedBy,
   });
@@ -79,6 +81,13 @@ abstract class PostFlightRepository {
     String? followUpAssignedTo,
     DateTime? followUpDueDate,
     required String performedBy,
+  });
+
+  Future<void> addPostFlightAmendment({
+    String? id,
+    required String flightId,
+    required String amendmentText,
+    required String createdBy,
   });
 
   Future<void> saveBatteryEndState({
@@ -106,4 +115,3 @@ abstract class PostFlightRepository {
     required String closedBy
   });
 }
-

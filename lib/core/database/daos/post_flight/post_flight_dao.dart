@@ -19,6 +19,7 @@ final _uuid = Uuid();
     SortiePayloads,
     Payloads,
     PostFlightNotes,
+    RecordAmendments,
     AuditEvents,
     SyncQueue,
   ],
@@ -141,7 +142,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
     }).toList();
   }
 
-  Future<void> savePostFlightNote({
+  Future<String> savePostFlightNote({
     String? id,
     required String flightId,
     required String objectiveResult,
@@ -169,6 +170,12 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
     final normalizedObjectiveResult = _upper(objectiveResult);
     final normalizedMissionRating = _nullableUpper(missionRating);
     final normalizedLogStoredAt = _nullableUpper(logStoredAt);
+    final resolvedFollowUpRequired =
+        followUpRequired ||
+        _requiresFollowUp(
+          objectiveResult: normalizedObjectiveResult,
+          issuesEncountered: issuesEncountered,
+        );
     final normalizedFollowUpStatus =
         _nullableUpper(followUpStatus) ?? _followUpPending;
 
@@ -177,7 +184,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
       missionRating: normalizedMissionRating,
       logStoredAt: normalizedLogStoredAt,
       followUpStatus: normalizedFollowUpStatus,
-      followUpRequired: followUpRequired,
+      followUpRequired: resolvedFollowUpRequired,
       followUpNotes: followUpNotes,
       followUpAssignedTo: followUpAssignedTo,
       followUpDueDate: followUpDueDate,
@@ -200,7 +207,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
             logLocation: Value(logLocation),
             logNotes: Value(logNotes),
             flightDurationSeconds: Value(durationSeconds),
-            followUpRequired: Value(followUpRequired),
+            followUpRequired: Value(resolvedFollowUpRequired),
             followUpNotes: Value(followUpNotes),
             followUpAssignedTo: Value(followUpAssignedTo),
             followUpDueDate: Value(followUpDueDate),
@@ -222,7 +229,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
             logLocation: Value(logLocation),
             logNotes: Value(logNotes),
             flightDurationSeconds: Value(durationSeconds),
-            followUpRequired: Value(followUpRequired),
+            followUpRequired: Value(resolvedFollowUpRequired),
             followUpNotes: Value(followUpNotes),
             followUpAssignedTo: Value(followUpAssignedTo),
             followUpDueDate: Value(followUpDueDate),
@@ -250,6 +257,8 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
         operation: existingNote == null ? 'INSERT' : 'UPDATE',
       );
     });
+
+    return noteId;
   }
 
   Future<void> updateObjectiveResult({
@@ -269,6 +278,9 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
     }
 
     final now = DateTime.now();
+    final shouldRequireFollowUp =
+        note.followUpRequired ||
+        _requiresFollowUp(objectiveResult: normalizedObjectiveResult);
 
     await transaction(() async {
       await (update(db.postFlightNotes)
@@ -277,6 +289,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
         PostFlightNotesCompanion(
           objectiveResult: Value(normalizedObjectiveResult),
           objectiveNotes: Value(objectiveNotes),
+          followUpRequired: Value(shouldRequireFollowUp),
           updatedAt: Value(now),
         ),
       );
@@ -409,6 +422,9 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
     final note = await _requirePostFlightNote(flightId);
     final sortie = await _requireSortie(flightId);
     final now = DateTime.now();
+    final shouldRequireFollowUp =
+        note.followUpRequired ||
+        _requiresFollowUp(issuesEncountered: issuesEncountered);
 
     await transaction(() async {
       await (update(db.postFlightNotes)
@@ -417,6 +433,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
         PostFlightNotesCompanion(
           issuesEncountered: Value(issuesEncountered),
           notes: Value(notes),
+          followUpRequired: Value(shouldRequireFollowUp),
           updatedAt: Value(now),
         ),
       );
@@ -528,11 +545,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
     await transaction(() async {
       await (update(db.sortieBatteries)
-            ..where(
-              (v) =>
-                  v.flightId.equals(flightId) &
-                  v.batteryId.equals(batteryId),
-            ))
+            ..where((v) => v.id.equals(sortieBattery.id)))
           .write(
         SortieBatteriesCompanion(
           voltageEnd: Value(voltageEnd),
@@ -546,7 +559,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
       await _insertAuditEvent(
         entityType: 'SORTIE_BATTERY',
-        entityId: '$flightId:$batteryId',
+        entityId: sortieBattery.id,
         action: 'UPDATE_END_STATE',
         description: 'Battery end state saved',
         performedBy: performedBy,
@@ -554,8 +567,49 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
       await _enqueueSync(
         entityType: 'SORTIE_BATTERY',
-        entityId: '$flightId:$batteryId',
+        entityId: sortieBattery.id,
         operation: 'UPDATE',
+      );
+    });
+  }
+
+  Future<void> addPostFlightAmendment({
+    String? id,
+    required String flightId,
+    required String amendmentText,
+    required String createdBy,
+  }) async {
+    final note = await _requirePostFlightNote(flightId);
+
+    if (amendmentText.trim().isEmpty) {
+      throw Exception('Amendment text cannot be empty.');
+    }
+
+    final amendmentId = id ?? _uuid.v4();
+
+    await transaction(() async {
+      await into(db.recordAmendments).insert(
+        RecordAmendmentsCompanion.insert(
+          id: amendmentId,
+          entityType: 'POST_FLIGHT_NOTE',
+          entityId: note.id,
+          amendmentText: amendmentText,
+          createdBy: createdBy,
+        ),
+      );
+
+      await _insertAuditEvent(
+        entityType: 'POST_FLIGHT_NOTE',
+        entityId: note.id,
+        action: 'AMEND',
+        description: amendmentText,
+        performedBy: createdBy,
+      );
+
+      await _enqueueSync(
+        entityType: 'RECORD_AMENDMENT',
+        entityId: amendmentId,
+        operation: 'INSERT',
       );
     });
   }
@@ -575,13 +629,17 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
     }
 
     final sortie = await _requireSortie(flightId);
+
     final existingBatteries = await (select(db.sortieBatteries)
           ..where((v) => v.flightId.equals(flightId)))
         .get();
-    final existingBatteryIds = existingBatteries.map((v) => v.batteryId).toSet();
+
+    final existingByBatteryId = {
+      for (final battery in existingBatteries) battery.batteryId: battery,
+    };
 
     for (final battery in batteries) {
-      if (!existingBatteryIds.contains(battery.batteryId)) {
+      if (!existingByBatteryId.containsKey(battery.batteryId)) {
         throw Exception(
           'Battery ${battery.batteryId} was not selected for this sortie.',
         );
@@ -592,12 +650,10 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
     await transaction(() async {
       for (final battery in batteries) {
+        final existingBattery = existingByBatteryId[battery.batteryId]!;
+
         await (update(db.sortieBatteries)
-              ..where(
-                (v) =>
-                    v.flightId.equals(flightId) &
-                    v.batteryId.equals(battery.batteryId),
-              ))
+              ..where((v) => v.id.equals(existingBattery.id)))
             .write(
           SortieBatteriesCompanion(
             voltageEnd: Value(battery.voltageEnd),
@@ -608,7 +664,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
         await _insertAuditEvent(
           entityType: 'SORTIE_BATTERY',
-          entityId: '$flightId:${battery.batteryId}',
+          entityId: existingBattery.id,
           action: 'UPDATE_END_STATE',
           description: 'Battery end state saved',
           performedBy: performedBy,
@@ -616,7 +672,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
         await _enqueueSync(
           entityType: 'SORTIE_BATTERY',
-          entityId: '$flightId:${battery.batteryId}',
+          entityId: existingBattery.id,
           operation: 'UPDATE',
         );
       }
@@ -991,19 +1047,8 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
       throw Exception('Invalid follow-up status: $followUpStatus');
     }
 
-    if (followUpRequired) {
-      final hasFollowUpDetail =
-          (followUpNotes != null && followUpNotes.trim().isNotEmpty) ||
-              (followUpAssignedTo != null &&
-                  followUpAssignedTo.trim().isNotEmpty) ||
-              followUpDueDate != null;
-
-      if (!hasFollowUpDetail) {
-        throw Exception(
-          'Follow-up is marked required, but no follow-up detail was provided.',
-        );
-      }
-    }
+    // Follow-up can be auto-flagged from objective/incident data before the
+    // assignee, date, or notes are known.
   }
 
   List<String> _validateExistingPostFlightNoteForClosure(
@@ -1033,20 +1078,20 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
       issues.add('Invalid follow-up status: ${note.followUpStatus}.');
     }
 
-    if (note.followUpRequired) {
-      final hasFollowUpDetail =
-          (note.followUpNotes != null &&
-                  note.followUpNotes!.trim().isNotEmpty) ||
-              (note.followUpAssignedTo != null &&
-                  note.followUpAssignedTo!.trim().isNotEmpty) ||
-              note.followUpDueDate != null;
-
-      if (!hasFollowUpDetail) {
-        issues.add('Follow-up is required but no follow-up detail is present.');
-      }
-    }
-
     return issues;
+  }
+
+  bool _requiresFollowUp({
+    String? objectiveResult,
+    String? issuesEncountered,
+  }) {
+    final normalizedObjectiveResult = _nullableUpper(objectiveResult);
+    final hasIssue =
+        issuesEncountered != null && issuesEncountered.trim().isNotEmpty;
+
+    return hasIssue ||
+        (normalizedObjectiveResult != null &&
+            normalizedObjectiveResult != 'YES');
   }
 
   void _validateBatteryEndState({

@@ -246,6 +246,7 @@ extension ChecklistResponseWithItemMapper on ChecklistResponseWithItem {
       valueNumber: response.valueNumber,
       notes: response.notes,
       createdBy: response.createdBy,
+      responseAt: response.responseAt,
       createdAt: response.createdAt,
       updatedAt: response.updatedAt,
       item: item.toRecordEntity(),

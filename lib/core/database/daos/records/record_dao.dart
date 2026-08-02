@@ -78,8 +78,12 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   Future<List<FieldSession>> searchSessions({
     required String query,
     String? status,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String? vehicleId,
+    String? picUserId,
     int limit = 50,
-  }) {
+  }) async {
     final cleanQuery = query.trim();
     final normalizedStatus = status?.trim().toUpperCase();
 
@@ -90,17 +94,65 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
       ])
       ..limit(limit);
 
+    final matchingSessionIds = <String>{};
+
     if (cleanQuery.isNotEmpty) {
+      final vehicleMatches = await (select(db.sessionVehicles).join([
+        innerJoin(
+          db.vehicles,
+          db.vehicles.id.equalsExp(db.sessionVehicles.vehicleId),
+        ),
+      ])
+            ..where(db.vehicles.name.contains(cleanQuery)))
+          .get();
+
+      matchingSessionIds.addAll(
+        vehicleMatches.map((row) => row.readTable(db.sessionVehicles).sessionId),
+      );
+
+      final userMatches = await (select(db.sorties).join([
+        innerJoin(db.users, db.users.id.equalsExp(db.sorties.picUserId)),
+      ])
+            ..where(db.users.name.contains(cleanQuery)))
+          .get();
+
+      matchingSessionIds.addAll(
+        userMatches.map((row) => row.readTable(db.sorties).sessionId),
+      );
+
       selector.where(
         (v) =>
             v.locationName.contains(cleanQuery) |
             v.missionType.contains(cleanQuery) |
-            v.sessionStatus.contains(cleanQuery),
+            v.sessionStatus.contains(cleanQuery) |
+            v.sessionId.isIn(matchingSessionIds.toList()),
       );
     }
 
     if (normalizedStatus != null && normalizedStatus.isNotEmpty) {
       selector.where((v) => v.sessionStatus.equals(normalizedStatus));
+    }
+
+    if (dateFrom != null) {
+      selector.where((v) => v.date.isBiggerOrEqualValue(dateFrom));
+    }
+
+    if (dateTo != null) {
+      selector.where((v) => v.date.isSmallerOrEqualValue(dateTo));
+    }
+
+    if (vehicleId != null && vehicleId.trim().isNotEmpty) {
+      final rows = await (select(db.sessionVehicles)
+            ..where((v) => v.vehicleId.equals(vehicleId)))
+          .get();
+      selector.where((v) => v.sessionId.isIn(rows.map((row) => row.sessionId)));
+    }
+
+    if (picUserId != null && picUserId.trim().isNotEmpty) {
+      final rows = await (select(db.sorties)
+            ..where((v) => v.picUserId.equals(picUserId)))
+          .get();
+      selector.where((v) => v.sessionId.isIn(rows.map((row) => row.sessionId)));
     }
 
     return selector.get();
@@ -489,6 +541,55 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
       entityType: 'FIELD_SESSION',
       entityId: sessionId,
     );
+  }
+
+  Future<List<Sorty>> getSortiesForVehicle({
+    required String vehicleId,
+    int limit = 50,
+  }) async {
+    final query = select(db.sorties).join([
+      innerJoin(
+        db.sessionVehicles,
+        db.sessionVehicles.id.equalsExp(db.sorties.sessionVehicleId),
+      ),
+    ])
+      ..where(db.sessionVehicles.vehicleId.equals(vehicleId))
+      ..orderBy([
+        OrderingTerm.desc(db.sorties.landingAt),
+        OrderingTerm.desc(db.sorties.updatedAt),
+      ])
+      ..limit(limit);
+
+    final rows = await query.get();
+
+    return rows.map((row) => row.readTable(db.sorties)).toList();
+  }
+
+  Future<int> countSortiesForVehicle(String vehicleId) async {
+    final countExp = db.sorties.flightId.count();
+    final query = selectOnly(db.sorties).join([
+      innerJoin(
+        db.sessionVehicles,
+        db.sessionVehicles.id.equalsExp(db.sorties.sessionVehicleId),
+      ),
+    ])
+      ..addColumns([countExp])
+      ..where(db.sessionVehicles.vehicleId.equals(vehicleId));
+
+    final row = await query.getSingle();
+
+    return row.read(countExp) ?? 0;
+  }
+
+  Future<int> countSessionsForSite(String locationName) async {
+    final countExp = db.fieldSessions.sessionId.count();
+    final query = selectOnly(db.fieldSessions)
+      ..addColumns([countExp])
+      ..where(db.fieldSessions.locationName.equals(locationName));
+
+    final row = await query.getSingle();
+
+    return row.read(countExp) ?? 0;
   }
 
   String _normalizeEntityType(String entityType) {

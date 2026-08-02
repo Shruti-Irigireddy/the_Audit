@@ -9,6 +9,7 @@ class ChecklistResponseEntity {
   final double? valueNumber;
   final String? notes;
   final String createdBy;
+  final DateTime responseAt;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -21,6 +22,7 @@ class ChecklistResponseEntity {
     this.valueNumber,
     this.notes,
     required this.createdBy,
+    required this.responseAt,
     required this.createdAt,
     required this.updatedAt
   });
