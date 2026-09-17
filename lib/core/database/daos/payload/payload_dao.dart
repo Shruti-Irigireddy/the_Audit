@@ -1,0 +1,480 @@
+import 'package:drift/drift.dart';
+import 'package:uuid/uuid.dart';
+
+import '../../app_database.dart';
+
+part 'payload_dao.g.dart';
+
+const _uuid = Uuid();
+
+@DriftAccessor(
+  tables: [
+    Payloads,
+    PayloadVehicleCompatibility,
+    SessionVehiclePayload,
+    SortiePayloads,
+    AuditEvents,
+    SyncQueue,
+  ],
+)
+
+class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
+  PayloadDao(super.db);
+
+  Future<String> createPayload ({
+    String? payloadId,
+    required String name,
+    required String category,
+    String? storageType,
+    String? storageCapacity,
+    String? status,
+    List<String> compatibleVehicleTypes = const [],
+    required String performedBy,
+  }) async {
+    final id = payloadId ?? _uuid.v4();
+    final resolvedStatus = status ?? 'ACTIVE';
+
+    await transaction(() async {
+      await into(db.payloads).insert(
+        PayloadsCompanion.insert(
+          payloadId: id,
+          name: name,
+          category: category,
+          storageType: Value(storageType),
+          storageCapacity: Value(storageCapacity),
+          status: Value(resolvedStatus),
+        ),
+      );
+
+      final uniqueTypes = _normalizeVehicleTypes(compatibleVehicleTypes);
+
+      for (final vehicleType in uniqueTypes) {
+        await _insertCompatibilityRow(
+          payloadId: id,
+          vehicleType: vehicleType,
+        );
+      }
+
+      await _insertAuditEvent(
+        entityType: 'PAYLOAD',
+        entityId: id,
+        action: 'CREATE',
+        description: 'Payload created',
+        performedBy: performedBy,
+      );
+
+      await _enqueueSync(
+        entityType: 'PAYLOAD',
+        entityId: id,
+        operation: 'INSERT',
+      );
+    });
+
+    return id;
+  }
+
+  Future<Payload?> getPayloadById(String payloadId){
+    return (select(db.payloads)
+          ..where((v) => v.payloadId.equals(payloadId)))
+        .getSingleOrNull();
+  }
+
+  Future<List<Payload>> getAllPayloads() {
+    return (select(db.payloads)
+          ..orderBy([
+            (v) => OrderingTerm.asc(v.name),
+          ]))
+        .get();
+  }
+
+  Future<List<Payload>> searchPayloads(String query) {
+    final cleanedQuery = query.trim();
+
+    if (cleanedQuery.isEmpty) {
+      return getAllPayloads();
+    }
+
+    final likeQuery = '%$cleanedQuery%';
+
+    return (select(db.payloads)
+          ..where(
+            (v) =>
+                v.name.like(likeQuery) |
+                v.category.like(likeQuery) |
+                v.status.like(likeQuery) |
+                v.storageType.like(likeQuery) |
+                v.storageCapacity.like(likeQuery),
+          )
+          ..orderBy([
+            (v) => OrderingTerm.asc(v.name),
+          ]))
+        .get();
+  }
+
+  Future<List<PayloadVehicleCompatibilityData>>
+      getCompatibilityRulesForPayload(String payloadId) {
+    return (select(db.payloadVehicleCompatibility)
+          ..where((v) => v.payloadId.equals(payloadId))
+          ..orderBy([
+            (v) => OrderingTerm.asc(v.vehicleType),
+          ]))
+        .get();
+  }
+
+  Future<List<String>> getCompatibleVehicleTypes(String payloadId) async {
+    final rows = await getCompatibilityRulesForPayload(payloadId);
+
+    return rows.map((row) => row.vehicleType).toList();
+  }
+
+  Future<bool> isPayloadCompatibleWithVehicleType({
+    required String payloadId,
+    required String vehicleType,
+  }) async {
+    final rows = await getCompatibilityRulesForPayload(payloadId);
+
+    // No rows means unrestricted payload.
+    // It can be used with any vehicle type.
+    if (rows.isEmpty) {
+      return true;
+    }
+
+    final normalizedVehicleType = vehicleType.trim().toUpperCase();
+
+    return rows.any(
+      (row) => row.vehicleType.trim().toUpperCase() == normalizedVehicleType,
+    );
+  }
+
+  Future<List<Payload>> getPayloadsCompatibleWithVehicleType(
+    String vehicleType,
+  ) async {
+    final allPayloads = await getAllPayloads();
+    final compatiblePayloads = <Payload>[];
+
+    for (final payload in allPayloads) {
+      final isCompatible = await isPayloadCompatibleWithVehicleType(
+        payloadId: payload.payloadId,
+        vehicleType: vehicleType,
+      );
+
+      if (isCompatible) {
+        compatiblePayloads.add(payload);
+      }
+    }
+
+    return compatiblePayloads;
+  }
+
+  Future<List<Payload>> getPayloadsExplicitlyCompatibleWithVehicleType(
+    String vehicleType,
+  ) async {
+    final normalizedVehicleType = vehicleType.trim().toUpperCase();
+
+    final query = select(db.payloads).join([
+      innerJoin(
+        db.payloadVehicleCompatibility,
+        db.payloadVehicleCompatibility.payloadId.equalsExp(
+          db.payloads.payloadId,
+        ),
+      ),
+    ])
+      ..where(
+        db.payloadVehicleCompatibility.vehicleType.equals(
+          normalizedVehicleType,
+        ),
+      )
+      ..orderBy([
+        OrderingTerm.asc(db.payloads.name),
+      ]);
+
+    final rows = await query.get();
+
+    return rows.map((row) => row.readTable(db.payloads)).toList();
+  }
+
+
+  Future<void> updatePayload({
+    required String payloadId,
+    String? name,
+    String? category,
+    String? storageType,
+    String? storageCapacity,
+    String? status,
+    required String performedBy,
+  }) async {
+    await _requirePayloadExists(payloadId);
+
+    await transaction(() async {
+      await (update(db.payloads)
+            ..where((v) => v.payloadId.equals(payloadId)))
+          .write(
+        PayloadsCompanion(
+          name: name == null ? const Value.absent() : Value(name),
+          category: category == null ? const Value.absent() : Value(category),
+          storageType:
+              storageType == null ? const Value.absent() : Value(storageType),
+          storageCapacity: storageCapacity == null
+              ? const Value.absent()
+              : Value(storageCapacity),
+          status: status == null ? const Value.absent() : Value(status),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
+
+      await _insertAuditEvent(
+        entityType: 'PAYLOAD',
+        entityId: payloadId,
+        action: 'UPDATE',
+        description: 'Payload updated',
+        performedBy: performedBy,
+      );
+
+      await _enqueueSync(
+        entityType: 'PAYLOAD',
+        entityId: payloadId,
+        operation: 'UPDATE',
+      );
+    });
+  }
+
+  Future<void> retirePayload({
+    required String payloadId,
+    required String performedBy,
+  }) {
+    return updatePayload(
+      payloadId: payloadId,
+      status: 'RETIRED',
+      performedBy: performedBy,
+    );
+  }
+
+  Future<void> deletePayload({
+    required String payloadId,
+    required String performedBy,
+  }) async {
+    await _requirePayloadExists(payloadId);
+
+    final usageCount = await _countPayloadUsage(payloadId);
+
+    if (usageCount > 0) {
+      throw Exception(
+        'Cannot delete payload because it is already used in sessions or sorties.',
+      );
+    }
+
+    await transaction(() async {
+      await (delete(db.payloadVehicleCompatibility)
+            ..where((v) => v.payloadId.equals(payloadId)))
+          .go();
+
+      await (delete(db.payloads)
+            ..where((v) => v.payloadId.equals(payloadId)))
+          .go();
+
+      await _insertAuditEvent(
+        entityType: 'PAYLOAD',
+        entityId: payloadId,
+        action: 'DELETE',
+        description: 'Payload deleted',
+        performedBy: performedBy,
+      );
+
+      await _enqueueSync(
+        entityType: 'PAYLOAD',
+        entityId: payloadId,
+        operation: 'DELETE',
+      );
+    });
+  }
+
+  Future<void> replacePayloadCompatibility({
+    required String payloadId,
+    required List<String> compatibleVehicleTypes,
+    required String performedBy,
+  }) async {
+    await _requirePayloadExists(payloadId);
+
+    await transaction(() async {
+      await (delete(db.payloadVehicleCompatibility)
+            ..where((v) => v.payloadId.equals(payloadId)))
+          .go();
+
+      final uniqueTypes = _normalizeVehicleTypes(compatibleVehicleTypes);
+
+      for (final vehicleType in uniqueTypes) {
+        await _insertCompatibilityRow(
+          payloadId: payloadId,
+          vehicleType: vehicleType,
+        );
+      }
+
+      await _insertAuditEvent(
+        entityType: 'PAYLOAD',
+        entityId: payloadId,
+        action: 'REPLACE_COMPATIBILITY',
+        description: 'Payload compatibility replaced',
+        performedBy: performedBy,
+      );
+
+      await _enqueueSync(
+        entityType: 'PAYLOAD',
+        entityId: payloadId,
+        operation: 'UPDATE',
+      );
+    });
+  }
+
+  Future<void> addPayloadCompatibility({
+    required String payloadId,
+    required String vehicleType,
+    required String performedBy,
+  }) async {
+    await _requirePayloadExists(payloadId);
+
+    final normalizedVehicleType = vehicleType.trim().toUpperCase();
+
+    if (normalizedVehicleType.isEmpty) {
+      throw Exception('Vehicle type cannot be empty.');
+    }
+
+    final existing = await (select(db.payloadVehicleCompatibility)
+          ..where(
+            (v) =>
+                v.payloadId.equals(payloadId) &
+                v.vehicleType.equals(normalizedVehicleType),
+          ))
+        .getSingleOrNull();
+
+    if (existing != null) {
+      return;
+    }
+
+    await transaction(() async {
+      await _insertCompatibilityRow(
+        payloadId: payloadId,
+        vehicleType: normalizedVehicleType,
+      );
+
+      await _insertAuditEvent(
+        entityType: 'PAYLOAD',
+        entityId: payloadId,
+        action: 'ADD_COMPATIBILITY',
+        description: 'Payload compatibility added: $normalizedVehicleType',
+        performedBy: performedBy,
+      );
+
+      await _enqueueSync(
+        entityType: 'PAYLOAD',
+        entityId: payloadId,
+        operation: 'UPDATE',
+      );
+    });
+  }
+
+  Future<void> removePayloadCompatibility({
+    required String payloadId,
+    required String vehicleType,
+    required String performedBy,
+  }) async {
+    await _requirePayloadExists(payloadId);
+
+    final normalizedVehicleType = vehicleType.trim().toUpperCase();
+
+    await transaction(() async {
+      await (delete(db.payloadVehicleCompatibility)
+            ..where(
+              (v) =>
+                  v.payloadId.equals(payloadId) &
+                  v.vehicleType.equals(normalizedVehicleType),
+            ))
+          .go();
+
+      await _insertAuditEvent(
+        entityType: 'PAYLOAD',
+        entityId: payloadId,
+        action: 'REMOVE_COMPATIBILITY',
+        description: 'Payload compatibility removed: $normalizedVehicleType',
+        performedBy: performedBy,
+      );
+
+      await _enqueueSync(
+        entityType: 'PAYLOAD',
+        entityId: payloadId,
+        operation: 'UPDATE',
+      );
+    });
+  }
+
+  Future<void> _requirePayloadExists(String payloadId) async {
+    final payload = await getPayloadById(payloadId);
+
+    if (payload == null) {
+      throw Exception('Payload not found: $payloadId');
+    }
+  }
+
+  Future<void> _insertCompatibilityRow({
+    required String payloadId,
+    required String vehicleType,
+  }) async {
+    await into(db.payloadVehicleCompatibility).insert(
+      PayloadVehicleCompatibilityCompanion.insert(
+        id: _uuid.v4(),
+        payloadId: payloadId,
+        vehicleType: vehicleType.trim().toUpperCase(),
+      ),
+    );
+  }
+
+  Set<String> _normalizeVehicleTypes(List<String> vehicleTypes) {
+    return vehicleTypes
+        .map((type) => type.trim().toUpperCase())
+        .where((type) => type.isNotEmpty)
+        .toSet();
+  }
+
+  Future<int> _countPayloadUsage(String payloadId) async {
+    final sessionPayloads = await (select(db.sessionVehiclePayload)
+          ..where((v) => v.payloadId.equals(payloadId)))
+        .get();
+
+    final sortiePayloads = await (select(db.sortiePayloads)
+          ..where((v) => v.payloadId.equals(payloadId)))
+        .get();
+
+    return sessionPayloads.length + sortiePayloads.length;
+  }
+
+  Future<void> _insertAuditEvent({
+    required String entityType,
+    required String entityId,
+    required String action,
+    String? description,
+    required String performedBy,
+  }) async {
+    await into(db.auditEvents).insert(
+      AuditEventsCompanion.insert(
+        entityType: entityType,
+        entityId: entityId,
+        action: action,
+        description: Value(description),
+        performedBy: performedBy,
+      ),
+    );
+  }
+
+  Future<void> _enqueueSync({
+    required String entityType,
+    required String entityId,
+    required String operation,
+  }) async {
+    await into(db.syncQueue).insert(
+      SyncQueueCompanion.insert(
+        entityType: entityType,
+        entityId: entityId,
+        operation: operation,
+      ),
+    );
+  }
+}
