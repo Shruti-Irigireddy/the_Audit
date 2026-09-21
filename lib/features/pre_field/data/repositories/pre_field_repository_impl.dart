@@ -31,6 +31,7 @@ class PreFieldRepositoryImpl implements PreFieldRepository {
     required double latitude,
     required double longitude,
     required String missionType,
+    required String sessionStatus,
     required String createdBy,
   }) {
     return  _preFieldDao.createFieldSession(
@@ -40,6 +41,7 @@ class PreFieldRepositoryImpl implements PreFieldRepository {
       latitude: latitude,
       longitude: longitude,
       missionType: missionType,
+      sessionStatus: sessionStatus,
       createdBy: createdBy,
     );
   }

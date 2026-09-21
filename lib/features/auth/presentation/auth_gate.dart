@@ -1,47 +1,45 @@
 import 'package:flutter/material.dart';
 
-import 'package:the_audit/features/auth/data/auth_storage.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
+import 'package:the_audit/features/auth/presentation/cubit/auth_state.dart';
 import 'package:the_audit/features/auth/presentation/login.dart';
 import 'package:the_audit/features/dashboard/presentation/home.dart';
 
-class AuthGate extends StatefulWidget {
-  const AuthGate({super.key});
-
-  @override
-  State<AuthGate> createState() => _AuthGateState();
-}
-
-class _AuthGateState extends State<AuthGate> {
-  final AuthStorage _authStorage = AuthStorage();
-
-  @override
-  void initState() {
-    super.initState();
-    _checkLoginStatus();
-  }
-  
-  Future<void> _checkLoginStatus() async {
-    final bool isLoggedIn = await _authStorage.isLoggedIn();
-
-    if(!mounted) return;
-    if (isLoggedIn) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const HomePage()),
-      );
-    } else {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const LoginPage()),
-      );  
-    }
-  }
+class AuthGate extends StatelessWidget {
+  final AppDatabase database;
+    final AuthCubit authCubit; const AuthGate({
+    super.key,
+    required this.database,
+    required this.authCubit,
+  });
 
   @override
   Widget build(BuildContext context) {
+    return BlocProvider.value(
+      value: authCubit,
+      child: BlocBuilder<AuthCubit, AuthState>(
+        builder: (context, state) {
+          if (state.viewStatus == AuthViewStatus.loading || state.viewStatus == AuthViewStatus.initial) {
     return const Scaffold(
       body: Center(
         child: CircularProgressIndicator(),
+      ),
+    );
+  }
+          if (state.isAuthenticated) {
+            return HomePage(
+              database: database,
+              authCubit: authCubit,
+            );
+}
+          return LoginPage(
+            database: database,
+            authCubit: authCubit,
+          );
+        },
       ),
     );
   }

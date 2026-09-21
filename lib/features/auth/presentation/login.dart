@@ -1,13 +1,17 @@
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/theme.dart';
-import 'package:the_audit/features/auth/data/auth_storage.dart';
-import 'package:the_audit/features/dashboard/presentation/home.dart';
-
-final AuthStorage _authStorage = AuthStorage();
+import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+  final AppDatabase database;
+  final AuthCubit authCubit;
+  const LoginPage({
+    super.key,
+    required this.database,
+    required this.authCubit,
+  });
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -27,13 +31,13 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     try {
-      final UserCredential userCredential =
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final firebase_auth.UserCredential userCredential =
+      await firebase_auth.FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
-      final User? user = userCredential.user;
+      final firebase_auth.User? user = userCredential.user;
       if (user == null) {
       setState(() {
         _errorMessage = "Login failed. User not found.";
@@ -41,44 +45,52 @@ class _LoginPageState extends State<LoginPage> {
       return false;
       }
 
-      await _authStorage.saveSession(user.uid, user.email ?? _emailController.text.trim());
+      await widget.authCubit.saveSession(
+        uid: user.uid,
+        email: user.email ?? _emailController.text.trim(),
+      );
       return true;
 
-    } on FirebaseAuthException catch (e) {
+    } on firebase_auth.FirebaseAuthException catch (e) {
+      if (mounted) {
       setState(() {
-        _isLoading = false;
         _errorMessage = e.message;
       });
+      }
       return false;
     } finally {
+      if (mounted) {
       setState(() {
         _isLoading = false;
       });
     }
   }
+  }
   Future<void> _forgotPassword() async {
-    final TextEditingController _forgotPasswordEmailController = TextEditingController();
+    final TextEditingController forgotPasswordEmailController = TextEditingController();
     await showDialog<void>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Forgot Password'),
           content: TextField(
-            controller: _forgotPasswordEmailController,
+            controller: forgotPasswordEmailController,
             decoration: const InputDecoration(labelText: 'Email'),
           ),
           actions: [
             TextButton(
               onPressed: () async {
                 try {
-                  await FirebaseAuth.instance.sendPasswordResetEmail(
-                    email: _forgotPasswordEmailController.text,
+                  await firebase_auth.FirebaseAuth.instance.sendPasswordResetEmail(
+                    email: forgotPasswordEmailController.text,
                   );
-                  Navigator.of(context).pop();
+                  if (!mounted || !dialogContext.mounted) return;
+                  Navigator.of(dialogContext).pop();
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Password reset email sent.')),
                   );
-                } on FirebaseAuthException catch (e) {
+                } on firebase_auth.FirebaseAuthException catch (e) {
+                  if (!mounted || !dialogContext.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text(e.message ?? 'An error occurred.')),
                   );
@@ -88,7 +100,7 @@ class _LoginPageState extends State<LoginPage> {
             ),
             TextButton(
               onPressed: () {
-                Navigator.of(context).pop();
+                Navigator.of(dialogContext).pop();
               },
               child: const Text('Cancel'),
             ),
@@ -96,7 +108,7 @@ class _LoginPageState extends State<LoginPage> {
         );
       },
     );
-    _forgotPasswordEmailController.dispose();
+    forgotPasswordEmailController.dispose();
   }
 
   @override
@@ -193,17 +205,7 @@ class _LoginPageState extends State<LoginPage> {
                             height: AppSizes.buttonHeight,
                             width: constraints.maxWidth * 0.3,
                             child: ElevatedButton(
-                              onPressed: _isLoading ? null : () async {
-                                bool success = await _login();
-
-                                if(!mounted) return;
-                                
-                                if (success) {
-                                  Navigator.pushReplacement(
-                                    context,
-                                    MaterialPageRoute(builder: (context) => const HomePage()),
-                                  );
-                                }
+                              onPressed: _isLoading ? null : () async { await _login();
                               },
                               style: ElevatedButton.styleFrom(
                                 shape: RoundedRectangleBorder(
@@ -222,10 +224,10 @@ class _LoginPageState extends State<LoginPage> {
                       alignment: Alignment.centerRight,
                       child: TextButton(
                         onPressed: _forgotPassword,
-                        child: const Text('Forgot Password?'),
                         style: TextButton.styleFrom(
                           foregroundColor: AppColors.snowWhite,
                         ),
+                        child: const Text('Forgot Password?'),
                       ),
                     ),
                   ],

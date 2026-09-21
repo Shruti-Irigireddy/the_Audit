@@ -38,6 +38,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required double latitude,
     required double longitude,
     required String missionType,
+    required String sessionStatus,
     required String createdBy,
   }) async {
     emit(
@@ -52,6 +53,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         latitude: latitude,
         longitude: longitude,
         missionType: missionType,
+        sessionStatus: sessionStatus,
         createdBy: createdBy,
       );
       await loadSession(id);

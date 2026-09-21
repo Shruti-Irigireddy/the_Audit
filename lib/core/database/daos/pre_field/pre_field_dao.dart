@@ -37,6 +37,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase> with _$PreFieldDaoMixin 
     required double latitude,
     required double longitude,
     required String missionType,
+    required String sessionStatus,
     required String createdBy,
   }) async {
     final resolvedSessionId = sessionId ?? _uuid.v4();
@@ -50,7 +51,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase> with _$PreFieldDaoMixin 
           latitude: latitude,
           longitude: longitude,
           missionType: missionType,
-          sessionStatus: 'IN_PROGRESS',
+          sessionStatus: sessionStatus,
         ),
       );
 

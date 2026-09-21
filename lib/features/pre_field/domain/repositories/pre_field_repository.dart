@@ -18,6 +18,7 @@ abstract class PreFieldRepository {
     required double latitude,
     required double longitude,
     required String missionType,
+    required String sessionStatus,
     required String createdBy,
   });
 
