@@ -120,8 +120,9 @@ class AppLogger {
     );
     // Console copy so logs show in `flutter run` / IDE debug console too.
     debugPrint('$time ${level.label} [$tag] $message');
-    if (error != null)
+    if (error != null) {
       debugPrint('$time ${level.label} [$tag]   error: $error');
+    }
     if (stackTrace != null && level == LogLevel.error) {
       debugPrintStack(stackTrace: stackTrace, maxFrames: 8);
     }

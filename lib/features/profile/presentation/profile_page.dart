@@ -82,7 +82,9 @@ class _ProfilePageState extends State<ProfilePage> {
         _log.i('logged out');
 
         if (!mounted) return;
-        Navigator.of(context).pop();
+        // Profile can be opened from any page; close them all so the
+        // AuthGate underneath shows the login screen.
+        Navigator.of(context).popUntil((route) => route.isFirst);
       } catch (error, stackTrace) {
         _log.e('logout failed', error, stackTrace);
         if (!mounted) return;

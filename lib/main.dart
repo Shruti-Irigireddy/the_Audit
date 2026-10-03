@@ -72,12 +72,20 @@ class _TheAuditAppState extends State<TheAuditApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'The Audit',
-      debugShowCheckedModeBanner: false,
-      navigatorObservers: [if (AppLogger.enabled) AppRouteLogger()],
-      theme: AppTheme.lightTheme,
-      home: AuthGate(database: _database, authCubit: _authCubit),
+    // Provided above MaterialApp so every route (e.g. the NavBar's profile
+    // button on any page) can reach the database and auth state.
+    return RepositoryProvider.value(
+      value: _database,
+      child: BlocProvider.value(
+        value: _authCubit,
+        child: MaterialApp(
+          title: 'The Audit',
+          debugShowCheckedModeBanner: false,
+          navigatorObservers: [if (AppLogger.enabled) AppRouteLogger()],
+          theme: AppTheme.lightTheme,
+          home: AuthGate(database: _database, authCubit: _authCubit),
+        ),
+      ),
     );
   }
 }
