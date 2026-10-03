@@ -94,7 +94,6 @@ class _SessionScreenState extends State<SessionScreen> {
       ],
       child: Scaffold(
         appBar: const NavBar(),
-        backgroundColor: AppColors.iceBlue,
         body: SafeArea(
           child: BlocConsumer<PreFieldCubit, PreFieldState>(
             listener: _showPreFieldError,
@@ -111,7 +110,7 @@ class _SessionScreenState extends State<SessionScreen> {
                           postFlightState.isSaving;
 
                       return ListView(
-                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+                        padding: AppSizes.pageInsets,
                         children: [
                           _Header(
                             title: 'Session loop',
@@ -402,18 +401,13 @@ class _Header extends StatelessWidget {
         IconButton(
           onPressed: onBack,
           icon: const Icon(Icons.arrow_back),
-          color: AppColors.darkNavy,
           tooltip: 'Back',
         ),
         const SizedBox(width: 6),
         Expanded(
           child: Text(
             title,
-            style: const TextStyle(
-              color: AppColors.darkNavy,
-              fontSize: 26,
-              fontWeight: FontWeight.w700,
-            ),
+            style: AppTextStyles.pageTitle,
           ),
         ),
       ],
@@ -450,21 +444,15 @@ class _StepChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Expanded(
       child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: active ? AppColors.deepBlue : AppColors.cardWhite,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: AppColors.steelBlue.withValues(alpha: 0.2)),
-        ),
+        decoration: AppDecorations.stepChip(active: active),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),
           child: Text(
             label,
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: active ? AppColors.snowWhite : AppColors.darkNavy,
-              fontWeight: FontWeight.w700,
-              fontSize: 12,
-            ),
+            style: active
+                ? AppTextStyles.chipLabel.copyWith(color: AppColors.snowWhite)
+                : AppTextStyles.chipLabel,
           ),
         ),
       ),
@@ -509,12 +497,12 @@ class _SetupPanel extends StatelessWidget {
           session == null
               ? 'Loading session'
               : '${session!.locationName} - ${session!.missionType}',
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          style: AppTextStyles.sectionTitle,
         ),
         const SizedBox(height: 14),
         DropdownButtonFormField<String>(
           initialValue: selectedSessionVehicleId,
-          decoration: _inputDecoration(
+          decoration: AppDecorations.field(
             label: 'Vehicle',
             icon: Icons.flight_takeoff_outlined,
           ),
@@ -531,7 +519,7 @@ class _SetupPanel extends StatelessWidget {
         const SizedBox(height: 14),
         DropdownButtonFormField<String>(
           initialValue: selectedPicUserId,
-          decoration: _inputDecoration(
+          decoration: AppDecorations.field(
             label: 'PIC',
             icon: Icons.person_outline,
           ),
@@ -550,7 +538,7 @@ class _SetupPanel extends StatelessWidget {
           controller: objectiveController,
           minLines: 2,
           maxLines: 4,
-          decoration: _inputDecoration(
+          decoration: AppDecorations.field(
             label: 'Objective',
             icon: Icons.flag_outlined,
           ),
@@ -591,7 +579,7 @@ class _ChecklistPanel extends StatelessWidget {
       children: [
         Text(
           sortie == null ? 'Checklist' : 'Flight ${sortie!.sequenceNo}',
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          style: AppTextStyles.sectionTitle,
         ),
         const SizedBox(height: 12),
         if (state.isLoading)
@@ -649,14 +637,14 @@ class _PostFlightPanel extends StatelessWidget {
           sortie == null
               ? 'Post-flight notes'
               : 'Post-flight ${sortie!.sequenceNo}',
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          style: AppTextStyles.sectionTitle,
         ),
         const SizedBox(height: 14),
         TextField(
           controller: objectiveNotesController,
           minLines: 2,
           maxLines: 4,
-          decoration: _inputDecoration(
+          decoration: AppDecorations.field(
             label: 'Objective notes',
             icon: Icons.assignment_turned_in_outlined,
           ),
@@ -666,7 +654,7 @@ class _PostFlightPanel extends StatelessWidget {
           controller: issuesController,
           minLines: 2,
           maxLines: 4,
-          decoration: _inputDecoration(
+          decoration: AppDecorations.field(
             label: 'Issues encountered',
             icon: Icons.report_problem_outlined,
           ),
@@ -676,7 +664,7 @@ class _PostFlightPanel extends StatelessWidget {
           controller: notesController,
           minLines: 2,
           maxLines: 4,
-          decoration: _inputDecoration(
+          decoration: AppDecorations.field(
             label: 'Notes',
             icon: Icons.notes_outlined,
           ),
@@ -684,7 +672,7 @@ class _PostFlightPanel extends StatelessWidget {
         if (state.hasBlockingIssues) ...[
           const SizedBox(height: 14),
           for (final issue in state.completionIssues)
-            Text(issue, style: const TextStyle(color: AppColors.errorRed)),
+            Text(issue, style: AppTextStyles.error),
         ],
         const SizedBox(height: 18),
         FilledButton.icon(
@@ -711,20 +699,9 @@ class _Panel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: AppColors.cardWhite,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.steelBlue.withValues(alpha: 0.18)),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.black.withValues(alpha: 0.06),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
+      decoration: AppDecorations.panel,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppSizes.panelPadding),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: children,
@@ -734,27 +711,3 @@ class _Panel extends StatelessWidget {
   }
 }
 
-InputDecoration _inputDecoration({
-  required String label,
-  required IconData icon,
-}) {
-  return InputDecoration(
-    labelText: label,
-    prefixIcon: Icon(icon),
-    filled: true,
-    fillColor: AppColors.snowWhite,
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(AppSizes.inputRadius),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(AppSizes.inputRadius),
-      borderSide: BorderSide(
-        color: AppColors.steelBlue.withValues(alpha: 0.28),
-      ),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(AppSizes.inputRadius),
-      borderSide: const BorderSide(color: AppColors.deepBlue, width: 1.4),
-    ),
-  );
-}

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:the_audit/core/utils/navbar.dart';
+import 'package:the_audit/core/utils/theme.dart';
 
 enum VehicleType { MULTIROTAR, FIXED_WING, VTOL }
 enum status { ACTIVE, MAINTENANCE, RETIRED }
@@ -40,17 +41,13 @@ enum FrameStyle {FOLDING, FIXED}
                 children: [
                   const Text (
                     'Add Vehicle',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: AppTextStyles.pageTitle,
                   ),
                   const SizedBox(height: 16.0),
                   
                   TextFormField(
                     decoration: const InputDecoration(
                       labelText: 'Vehicle Name / Nickname',
-                      border: OutlineInputBorder(),
                     )
                   ),
 
@@ -60,7 +57,6 @@ enum FrameStyle {FOLDING, FIXED}
                     value: _selectedVehicleType,
                     decoration: const InputDecoration(
                       labelText: 'Vehicle Type',
-                      border: OutlineInputBorder(),
                     ),
                     items: VehicleType.values.map((VehicleType type) {
                       return DropdownMenuItem<VehicleType>(
@@ -77,10 +73,7 @@ enum FrameStyle {FOLDING, FIXED}
                   const SizedBox(height: 16.0),
                   const Text(
                     'Frame Details',
-                    style: TextStyle(
-                      fontSize: 18, 
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: AppTextStyles.sectionTitle,
                   ),
                   const SizedBox(height: 16.0),
                   Wrap(
@@ -91,7 +84,6 @@ enum FrameStyle {FOLDING, FIXED}
                         TextFormField(
                           decoration: const InputDecoration(
                             labelText: 'Make',
-                            border: OutlineInputBorder(),
                           ),
                         ),
                       ),
@@ -99,7 +91,6 @@ enum FrameStyle {FOLDING, FIXED}
                         TextFormField(
                           decoration: const InputDecoration(
                             labelText: 'Model',
-                            border: OutlineInputBorder(),
                           ),
                         ),
                       ),
@@ -107,7 +98,6 @@ enum FrameStyle {FOLDING, FIXED}
                         TextFormField(
                           decoration: const InputDecoration(
                             labelText: 'Motor Count',
-                            border: OutlineInputBorder(),
                           ),
                         ),
                       ),
@@ -116,7 +106,6 @@ enum FrameStyle {FOLDING, FIXED}
                           value: _selectedFrameStyle,
                           decoration: const InputDecoration(
                             labelText: 'Frame Style',
-                            border: OutlineInputBorder(),
                           ),
                           items: FrameStyle.values.map((FrameStyle style) {
                             return DropdownMenuItem<FrameStyle>(
@@ -137,14 +126,12 @@ enum FrameStyle {FOLDING, FIXED}
                   TextFormField(
                     decoration: const InputDecoration(
                       labelText: 'Firmware Target',
-                      border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 16.0),
                   TextFormField(
                     decoration: const InputDecoration(
                       labelText: 'Default Fail Safe Profile',
-                      border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 16.0),
@@ -152,7 +139,6 @@ enum FrameStyle {FOLDING, FIXED}
                     value: _selectedVehicleStatus,
                     decoration: const InputDecoration(
                       labelText: 'Vehicle Status',
-                      border: OutlineInputBorder(),
                     ),
                     items: status.values.map((status stat) {
                       return DropdownMenuItem<status>(
@@ -170,7 +156,6 @@ enum FrameStyle {FOLDING, FIXED}
                   TextFormField(
                     decoration: const InputDecoration(
                       labelText: 'Notes',
-                      border: OutlineInputBorder(),
                     ),
                     maxLines: 3,
                   ),

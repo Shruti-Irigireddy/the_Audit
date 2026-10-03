@@ -81,10 +81,9 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
       ],
       child: Scaffold(
         appBar: const NavBar(),
-        backgroundColor: AppColors.iceBlue,
         body: SafeArea(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+            padding: AppSizes.pageInsets,
             children: [
               Row(
                 children: [
@@ -96,11 +95,7 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
                   const Expanded(
                     child: Text(
                       'Session loop',
-                      style: TextStyle(
-                        color: AppColors.darkNavy,
-                        fontSize: 24,
-                        fontWeight: FontWeight.w700,
-                      ),
+                      style: AppTextStyles.pageTitle,
                     ),
                   ),
                 ],
@@ -372,7 +367,7 @@ class _CreateSortieCard extends StatelessWidget {
           children: [
             const Text(
               'Prepare sortie',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              style: AppTextStyles.sectionTitle,
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(

@@ -6,38 +6,61 @@ import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_state.dart';
 import 'package:the_audit/features/auth/presentation/login.dart';
+import 'package:the_audit/features/auth/presentation/splash_screen.dart';
 import 'package:the_audit/features/dashboard/presentation/home.dart';
 
-class AuthGate extends StatelessWidget {
+class AuthGate extends StatefulWidget {
   final AppDatabase database;
-    final AuthCubit authCubit; const AuthGate({
-    super.key,
-    required this.database,
-    required this.authCubit,
-  });
+  final AuthCubit authCubit;
+  const AuthGate({super.key, required this.database, required this.authCubit});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  /// Keep the splash up for the full logo zoom, even when the session loads
+  /// instantly.
+  static const _minimumSplash = SplashScreen.zoomDuration;
+
+  bool _splashElapsed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(_minimumSplash, () {
+      if (mounted) setState(() => _splashElapsed = true);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return BlocProvider.value(
-      value: authCubit,
+      value: widget.authCubit,
       child: BlocBuilder<AuthCubit, AuthState>(
         builder: (context, state) {
-          if (state.viewStatus == AuthViewStatus.loading || state.viewStatus == AuthViewStatus.initial) {
-    return const Scaffold(
-      body: Center(
-        child: CircularProgressIndicator(),
-      ),
-    );
-  }
-          if (state.isAuthenticated) {
-            return HomePage(
-              database: database,
-              authCubit: authCubit,
+          final loading =
+              state.viewStatus == AuthViewStatus.loading ||
+              state.viewStatus == AuthViewStatus.initial;
+
+          final Widget page;
+          if (loading || !_splashElapsed) {
+            page = const SplashScreen();
+          } else if (state.isAuthenticated) {
+            page = HomePage(
+              database: widget.database,
+              authCubit: widget.authCubit,
             );
-}
-          return LoginPage(
-            database: database,
-            authCubit: authCubit,
+          } else {
+            page = LoginPage(
+              database: widget.database,
+              authCubit: widget.authCubit,
+            );
+          }
+
+          return AnimatedSwitcher(
+            duration: const Duration(milliseconds: 500),
+            child: KeyedSubtree(key: ValueKey(page.runtimeType), child: page),
           );
         },
       ),

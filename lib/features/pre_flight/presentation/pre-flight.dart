@@ -64,10 +64,9 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
 
           return Scaffold(
             appBar: const NavBar(),
-            backgroundColor: AppColors.iceBlue,
             body: SafeArea(
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+                padding: AppSizes.pageInsets,
                 children: [
                   Row(
                     children: [
@@ -79,11 +78,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
                       const Expanded(
                         child: Text(
                           'Pre-flight checklist',
-                          style: TextStyle(
-                            color: AppColors.darkNavy,
-                            fontSize: 24,
-                            fontWeight: FontWeight.w700,
-                          ),
+                          style: AppTextStyles.pageTitle,
                         ),
                       ),
                     ],
@@ -138,7 +133,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(
                         issue,
-                        style: const TextStyle(color: AppColors.errorRed),
+                        style: AppTextStyles.error,
                       ),
                     ),
                 ],
@@ -301,13 +296,13 @@ class _DecisionCard extends StatelessWidget {
           children: [
             const Text(
               'Final decision',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              style: AppTextStyles.cardTitle,
             ),
             if (state.selectedSortie?.decisionAt != null) ...[
               const SizedBox(height: 6),
               Text(
                 'Decision at ${_formatDateTime(state.selectedSortie!.decisionAt!)}',
-                style: const TextStyle(color: AppColors.steelBlue),
+                style: AppTextStyles.secondary,
               ),
             ],
             const SizedBox(height: 12),
@@ -383,13 +378,10 @@ class _ChecklistItemTile extends StatelessWidget {
           children: [
             Text(
               section,
-              style: const TextStyle(
-                color: AppColors.steelBlue,
-                fontWeight: FontWeight.w600,
-              ),
+              style: AppTextStyles.label,
             ),
             const SizedBox(height: 4),
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+            Text(label, style: AppTextStyles.bodyStrong),
             const SizedBox(height: 10),
             SegmentedButton<String>(
               segments: const [

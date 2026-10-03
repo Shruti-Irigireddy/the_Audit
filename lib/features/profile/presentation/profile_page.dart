@@ -74,7 +74,6 @@ class _ProfilePageState extends State<ProfilePage> {
     final firebaseUser = firebase_auth.FirebaseAuth.instance.currentUser;
 
     return Scaffold(
-      backgroundColor: AppColors.iceBlue,
       appBar: const NavBar(
         title: 'Profile',
         showBackButton: true,
@@ -137,7 +136,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   const Text(
                     'The local user profile could not be loaded.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: AppColors.errorRed),
+                    style: AppTextStyles.error,
                   ),
                 ],
                 const SizedBox(height: 32),
@@ -151,8 +150,6 @@ class _ProfilePageState extends State<ProfilePage> {
                       : const Icon(Icons.logout),
                   label: Text(_isLoggingOut ? 'Logging out...' : 'Logout'),
                   style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.deepBlue,
-                    foregroundColor: AppColors.snowWhite,
                     minimumSize: const Size.fromHeight(48),
                   ),
                 ),
@@ -179,11 +176,10 @@ class _ProfileDetail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: Icon(icon, color: AppColors.deepBlue),
+      leading: Icon(icon),
       title: Text(label),
       subtitle: Text(value),
       tileColor: AppColors.snowWhite,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
     );
   }
 }

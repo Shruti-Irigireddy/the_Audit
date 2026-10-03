@@ -118,6 +118,16 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
+  Widget _fieldLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        text,
+        style: AppAuthTheme.fieldLabel,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -125,118 +135,184 @@ class _LoginPageState extends State<LoginPage> {
         width: double.infinity,
         height: double.infinity,
         decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              AppColors.iceBlue,
-              AppColors.deepBlue,
-              AppColors.darkNavy,
-              
-            ],
-          ),
+          gradient: AppAuthTheme.backgroundGradient,
         ),
         child: SafeArea(
-          child: Center(
-            child:ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
-              child: Padding(
-                padding: const EdgeInsets.all(AppSizes.pagePadding),  
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Align(
-                    //   alignment: Alignment.center,
-                    //   child: Image.asset(
-                    //     'assets/logo.png',
-                    //     width: 100,
-                    //     height: 100,
-                    //   ),
-                    // ),
-                    Align(
-                      alignment: Alignment.center,
-                      child: const Text(
-                        'The Audit',
-                        style: TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.snowWhite,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final layout = _LoginLayout.from(
+                width: constraints.maxWidth,
+                height: constraints.maxHeight,
+              );
+              const shape = RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(
+                  Radius.circular(AppSizes.cardRadius),
+                ),
+                side: BorderSide(color: AppAuthTheme.cardBorder),
+              );
+
+              return SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: layout.pageGutter,
+                        vertical: 16,
                       ),
-                    ),
-                    ),
-                    const SizedBox(height: 32),
-                    TextField(
-                      controller: _emailController,
-                      decoration: const InputDecoration(
-                        labelText: 'Email',
-                        filled: true,
-                        fillColor: AppColors.mutedGrey,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(AppSizes.inputRadius)),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _passwordController,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Password',
-                        filled: true,
-                        fillColor: AppColors.mutedGrey,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(AppSizes.inputRadius)),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    if (_errorMessage != null)
-                      Text(
-                        _errorMessage!,
-                        style: const TextStyle(color: AppColors.errorRed),
-                      ),
-                    const SizedBox(height: 16),
-                    LayoutBuilder(
-                      builder: (context, constraints) {
-                        return Align(
-                          alignment: Alignment.center,
-                          child: SizedBox(
-                            height: AppSizes.buttonHeight,
-                            width: constraints.maxWidth * 0.3,
-                            child: ElevatedButton(
-                              onPressed: _isLoading ? null : () async { await _login();
-                              },
-                              style: ElevatedButton.styleFrom(
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(AppSizes.buttonHeight / 2),
-                                ),
+                      child: SizedBox(
+                        width: layout.cardWidth,
+                        child: DecoratedBox(
+                          decoration: const ShapeDecoration(
+                            shape: shape,
+                            color: AppAuthTheme.cardFill,
+                            shadows: [AppAuthTheme.cardShadow],
+                          ),
+                          child: ClipPath(
+                            clipper: ShapeBorderClipper(shape: shape),
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: layout.horizontalPadding,
+                                vertical: layout.verticalPadding,
                               ),
-                              child: _isLoading
-                                  ? const CircularProgressIndicator(color: AppColors.snowWhite)
-                                  : const Text('Login'),
+                              child: _buildForm(layout),
                             ),
                           ),
-                        );
-                      },
-                    ),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: _forgotPassword,
-                        style: TextButton.styleFrom(
-                          foregroundColor: AppColors.snowWhite,
                         ),
-                        child: const Text('Forgot Password?'),
                       ),
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildForm(_LoginLayout layout) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'THE AUDIT',
+          style: AppAuthTheme.title(layout.titleSize),
+        ),
+        const SizedBox(height: 28),
+        _fieldLabel('Email'),
+        TextField(
+          controller: _emailController,
+          keyboardType: TextInputType.emailAddress,
+          textInputAction: TextInputAction.next,
+          cursorColor: AppAuthTheme.cursorColor,
+          style: AppAuthTheme.fieldText,
+          decoration: AppAuthTheme.field('Enter email'),
+        ),
+        const SizedBox(height: 18),
+        _fieldLabel('Password'),
+        TextField(
+          controller: _passwordController,
+          obscureText: true,
+          textInputAction: TextInputAction.done,
+          cursorColor: AppAuthTheme.cursorColor,
+          style: AppAuthTheme.fieldText,
+          decoration: AppAuthTheme.field('Enter password'),
+        ),
+        const SizedBox(height: 16),
+        if (_errorMessage != null)
+          Text(
+            _errorMessage!,
+            style: AppAuthTheme.error,
+          ),
+        const SizedBox(height: 16),
+        SizedBox(
+          height: AppSizes.buttonHeight,
+          child: ElevatedButton(
+            onPressed: _isLoading
+                ? null
+                : () async {
+                    await _login();
+                  },
+            style: AppAuthTheme.loginButton,
+            child: _isLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.snowWhite,
+                    ),
+                  )
+                : const Text('Login  →'),
+          ),
+        ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: _forgotPassword,
+            style: AppAuthTheme.forgotPasswordButton,
+            child: const Text('Forgot Password?'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Breakpoint maths for the login card (Material 3 window-size classes).
+class _LoginLayout {
+  const _LoginLayout({
+    required this.cardWidth,
+    required this.horizontalPadding,
+    required this.verticalPadding,
+    required this.pageGutter,
+    required this.titleSize,
+  });
+
+  final double cardWidth;
+  final double horizontalPadding;
+  final double verticalPadding;
+  final double pageGutter;
+  final double titleSize;
+
+  factory _LoginLayout.from({required double width, required double height}) {
+    final isLandscapePhone = height < 500;
+
+    if (width < 600) {
+      const gutter = 16.0;
+      final cardWidth = width - 2 * gutter;
+      return _LoginLayout(
+        cardWidth: cardWidth,
+        horizontalPadding: 24,
+        verticalPadding: isLandscapePhone ? 24 : 44,
+        pageGutter: gutter,
+        titleSize: 28,
+      );
+    }
+
+    if (width < 840) {
+      const gutter = 24.0;
+      final cardWidth = (width - 2 * gutter).clamp(0.0, 520.0);
+      return _LoginLayout(
+        cardWidth: cardWidth,
+        horizontalPadding: 40,
+        verticalPadding: isLandscapePhone ? 24 : 60,
+        pageGutter: gutter,
+        titleSize: 34,
+      );
+    }
+
+    const cardWidth = 580.0;
+    return _LoginLayout(
+      cardWidth: cardWidth,
+      horizontalPadding: 48,
+      verticalPadding: isLandscapePhone ? 24 : 60,
+      pageGutter: 24,
+      titleSize: 34,
     );
   }
 }

@@ -82,10 +82,9 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
         builder: (context, state) {
           return Scaffold(
             appBar: const NavBar(),
-            backgroundColor: AppColors.iceBlue,
             body: SafeArea(
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+                padding: AppSizes.pageInsets,
                 children: [
                   Row(
                     children: [
@@ -97,11 +96,7 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
                       const Expanded(
                         child: Text(
                           'Post-flight notes',
-                          style: TextStyle(
-                            color: AppColors.darkNavy,
-                            fontSize: 24,
-                            fontWeight: FontWeight.w700,
-                          ),
+                          style: AppTextStyles.pageTitle,
                         ),
                       ),
                     ],
@@ -339,12 +334,7 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
   }
 
   InputDecoration _inputDecoration(String label) {
-    return InputDecoration(
-      labelText: label,
-      filled: true,
-      fillColor: AppColors.snowWhite,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-    );
+    return InputDecoration(labelText: label);
   }
 }
 
@@ -365,12 +355,7 @@ class _NotesField extends StatelessWidget {
       controller: controller,
       minLines: minLines,
       maxLines: 5,
-      decoration: InputDecoration(
-        labelText: label,
-        filled: true,
-        fillColor: AppColors.snowWhite,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      ),
+      decoration: InputDecoration(labelText: label),
     );
   }
 }
@@ -384,12 +369,7 @@ class _MissionRatingField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InputDecorator(
-      decoration: InputDecoration(
-        labelText: 'Mission rating',
-        filled: true,
-        fillColor: AppColors.snowWhite,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      ),
+      decoration: const InputDecoration(labelText: 'Mission rating'),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

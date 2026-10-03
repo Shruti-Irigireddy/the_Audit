@@ -1,47 +1,178 @@
 import 'package:flutter/material.dart';
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/features/pre_field/presentation/pre-field.dart';
+import 'package:the_audit/features/pre_field/presentation/session_loop.dart';
 import 'package:the_audit/features/profile/presentation/profile_page.dart';
 
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   final AppDatabase database;
   final AuthCubit authCubit;
-  const HomePage({
-    super.key,
-    required this.database,
-    required this.authCubit,
-  });
+  const HomePage({super.key, required this.database, required this.authCubit});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  late Future<List<FieldSession>> _sessions;
+
+  @override
+  void initState() {
+    super.initState();
+    _sessions = widget.database.recordDao.getRecentSessions();
+  }
+
+  void _reload() {
+    setState(() {
+      _sessions = widget.database.recordDao.getRecentSessions();
+    });
+  }
+
+  Future<void> _createSession() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CreateSessionPage(
+          database: widget.database,
+          authCubit: widget.authCubit,
+        ),
+      ),
+    );
+    if (mounted) _reload();
+  }
+
+  Future<void> _openSession(FieldSession session) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SessionLoopPage(
+          database: widget.database,
+          authCubit: widget.authCubit,
+          sessionId: session.sessionId,
+        ),
+      ),
+    );
+    if (mounted) _reload();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => CreateSessionPage(
-                database: database,
-                authCubit: authCubit,
-              ),
-            ),
-          );
-        },
-        child: const Icon(Icons.add),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _createSession,
+        icon: const Icon(Icons.add),
+        label: const Text('New session'),
       ),
       appBar: NavBar(
         onProfileTap: () {
           Navigator.of(context).push(
             MaterialPageRoute<void>(
               builder: (_) => ProfilePage(
-                database: database,
-                authCubit: authCubit,
+                database: widget.database,
+                authCubit: widget.authCubit,
               ),
             ),
           );
         },
       ),
+      body: SafeArea(
+        child: FutureBuilder<List<FieldSession>>(
+          future: _sessions,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return const Center(
+                child: Text(
+                  'Sessions could not be loaded.',
+                  style: AppTextStyles.error,
+                ),
+              );
+            }
+
+            final sessions = snapshot.data ?? const [];
+            return RefreshIndicator(
+              onRefresh: () async => _reload(),
+              child: ListView(
+                padding: AppSizes.pageInsets.copyWith(bottom: 96),
+                children: [
+                  const Text('Sessions', style: AppTextStyles.pageTitle),
+                  const SizedBox(height: 16),
+                  if (sessions.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 48),
+                      child: Text(
+                        'No sessions yet. Tap “New session” to plan one.',
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.secondary,
+                      ),
+                    )
+                  else
+                    for (final session in sessions)
+                      _SessionTile(
+                        session: session,
+                        onTap: () => _openSession(session),
+                      ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
+}
+
+class _SessionTile extends StatelessWidget {
+  final FieldSession session;
+  final VoidCallback onTap;
+
+  const _SessionTile({required this.session, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final date = session.date;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        onTap: onTap,
+        leading: const Icon(Icons.event_note_outlined),
+        title: Text(session.locationName, style: AppTextStyles.bodyStrong),
+        subtitle: Text(
+          '${date.day}/${date.month}/${date.year} · '
+          '${_titleCase(session.missionType)}',
+        ),
+        trailing: _StatusChip(status: session.sessionStatus),
+      ),
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  final String status;
+
+  const _StatusChip({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final isOpen = status != 'CLOSED';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: AppDecorations.stepChip(active: isOpen),
+      child: Text(
+        _titleCase(status),
+        style: isOpen
+            ? AppTextStyles.chipLabel.copyWith(color: AppColors.snowWhite)
+            : AppTextStyles.chipLabel,
+      ),
+    );
+  }
+}
+
+/// IN_PROGRESS -> In progress, DATA_COLLECTION -> Data collection.
+String _titleCase(String value) {
+  final words = value.toLowerCase().replaceAll('_', ' ');
+  return words.isEmpty ? words : words[0].toUpperCase() + words.substring(1);
 }

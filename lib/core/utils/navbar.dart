@@ -21,13 +21,11 @@ class NavBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) {
     return AppBar(
-      backgroundColor: AppColors.deepBlue,
-      elevation: 0,
       automaticallyImplyLeading: false,
       leading: showBackButton
           ? IconButton(
               onPressed: onBack ?? () => Navigator.of(context).maybePop(),
-              icon: const Icon(Icons.arrow_back, color: AppColors.snowWhite),
+              icon: const Icon(Icons.arrow_back),
               tooltip: 'Back',
             )
           : null,
@@ -50,11 +48,7 @@ class NavBar extends StatelessWidget implements PreferredSizeWidget {
                   const SizedBox(width: 8),
                   Text(
                     title,
-                    style: const TextStyle(
-                      color: AppColors.snowWhite,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 18,
-                    ),
+                    style: AppTextStyles.navTitle,
                   ),
                 ],
               ),
