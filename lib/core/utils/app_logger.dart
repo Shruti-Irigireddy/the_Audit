@@ -6,8 +6,11 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 /// Debug-only logging and tracing.
 ///
-/// Every method is a no-op outside debug mode ([kDebugMode] is a compile-time
-/// constant, so release and profile builds drop the logging entirely).
+/// Logging is OFF unless the app is a debug build started with
+/// `--dart-define=APP_LOGS=true` (the "The Audit (debug + logs)" launch
+/// configuration in .vscode/launch.json does this). A plain `flutter run`
+/// shows no app logs, and release/profile builds compile the logging out
+/// entirely because [AppLogger.enabled] is a compile-time constant.
 /// Output goes to `dart:developer` (filterable by tag in DevTools' Logging
 /// view) and to the console.
 ///
@@ -23,6 +26,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 /// Never log passwords, tokens or other secrets; mask emails with
 /// [AppLogger.mask].
 class AppLogger {
+  /// True only for debug builds run with `--dart-define=APP_LOGS=true`.
+  static const bool enabled = kDebugMode && bool.fromEnvironment('APP_LOGS');
+
   final String tag;
 
   const AppLogger(this.tag);
@@ -48,7 +54,7 @@ class AppLogger {
   /// records a timeline event so it shows up in DevTools' Performance view.
   /// In non-debug builds it just runs [action].
   Future<T> trace<T>(String operation, Future<T> Function() action) async {
-    if (!kDebugMode) return action();
+    if (!enabled) return action();
 
     final name = '$tag.$operation';
     final watch = Stopwatch()..start();
@@ -73,7 +79,7 @@ class AppLogger {
 
   /// Synchronous version of [trace].
   T traceSync<T>(String operation, T Function() action) {
-    if (!kDebugMode) return action();
+    if (!enabled) return action();
 
     final watch = Stopwatch()..start();
     _log(LogLevel.trace, '→ $operation');
@@ -101,7 +107,7 @@ class AppLogger {
     Object? error,
     StackTrace? stackTrace,
   ]) {
-    if (!kDebugMode) return;
+    if (!enabled) return;
 
     final time = DateTime.now().toIso8601String().substring(11, 23);
     developer.log(

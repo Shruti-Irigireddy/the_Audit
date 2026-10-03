@@ -3,7 +3,7 @@ import 'package:the_audit/core/utils/app_logger.dart';
 
 /// Debug-only drift interceptor: logs every SQL statement with its
 /// arguments, row count and duration, and transaction boundaries.
-/// Attached in [AppDatabase] only when `kDebugMode` is true.
+/// Attached in [AppDatabase] only when [AppLogger.enabled] is true.
 class SqlLogInterceptor extends QueryInterceptor {
   static const _log = AppLogger('SQL');
 

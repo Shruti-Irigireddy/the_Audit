@@ -1,6 +1,5 @@
 import 'dart:ui';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -18,7 +17,7 @@ const _log = AppLogger('App');
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  if (kDebugMode) {
+  if (AppLogger.enabled) {
     Bloc.observer = AppBlocObserver();
 
     // Uncaught Flutter framework errors (build/layout/paint).
@@ -76,7 +75,7 @@ class _TheAuditAppState extends State<TheAuditApp> {
     return MaterialApp(
       title: 'The Audit',
       debugShowCheckedModeBanner: false,
-      navigatorObservers: [if (kDebugMode) AppRouteLogger()],
+      navigatorObservers: [if (AppLogger.enabled) AppRouteLogger()],
       theme: AppTheme.lightTheme,
       home: AuthGate(database: _database, authCubit: _authCubit),
     );
