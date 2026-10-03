@@ -1,22 +1,27 @@
 import 'package:bloc/bloc.dart';
 
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/vehicle/domain/dtos/vehicle_dtos.dart';
 import 'package:the_audit/features/vehicle/domain/entities/vehicle_entity.dart';
 import 'package:the_audit/features/vehicle/domain/repositories/vehicle_repository.dart';
 import 'vehicle_state.dart';
 
 class VehicleCubit extends Cubit<VehicleState> {
+  static const _log = AppLogger('VehicleCubit');
+
   final VehicleRepository _repository;
 
   VehicleCubit(this._repository) : super(VehicleState.initial());
 
   Future<void> loadVehicles() async {
+    _log.t('loadVehicles()');
     emit(
       state.copyWith(viewStatus: VehicleViewStatus.loading, errorMessage: null),
     );
 
     try {
       final vehicles = await _repository.getAllVehicles();
+      _log.d('${vehicles.length} vehicles loaded');
       emit(
         state.copyWith(
           viewStatus: VehicleViewStatus.loaded,
@@ -24,18 +29,21 @@ class VehicleCubit extends Cubit<VehicleState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadVehicles failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> loadActiveVehicles() async {
+    _log.t('loadActiveVehicles()');
     emit(
       state.copyWith(viewStatus: VehicleViewStatus.loading, errorMessage: null),
     );
 
     try {
       final vehicles = await _repository.getActiveVehicles();
+      _log.d('${vehicles.length} active vehicles loaded');
       emit(
         state.copyWith(
           viewStatus: VehicleViewStatus.loaded,
@@ -44,12 +52,14 @@ class VehicleCubit extends Cubit<VehicleState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadActiveVehicles failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> searchVehicles(String query) async {
+    _log.t('searchVehicles("$query")');
     emit(
       state.copyWith(
         viewStatus: VehicleViewStatus.loading,
@@ -69,12 +79,14 @@ class VehicleCubit extends Cubit<VehicleState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('searchVehicles failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> selectVehicle(String vehicleId) async {
+    _log.t('selectVehicle($vehicleId)');
     emit(
       state.copyWith(viewStatus: VehicleViewStatus.loading, errorMessage: null),
     );
@@ -99,7 +111,8 @@ class VehicleCubit extends Cubit<VehicleState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('selectVehicle failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -118,6 +131,9 @@ class VehicleCubit extends Cubit<VehicleState> {
     required String createdBy,
     required List<ChecklistItemDraft> checklistItems,
   }) async {
+    _log.i(
+      'createVehicleWithChecklist(id: $vehicleId, type: ${type.name}, ${checklistItems.length} checklist items)',
+    );
     emit(
       state.copyWith(viewStatus: VehicleViewStatus.saving, errorMessage: null),
     );
@@ -137,6 +153,7 @@ class VehicleCubit extends Cubit<VehicleState> {
         createdBy: createdBy,
         checklistItems: checklistItems,
       );
+      _log.i('vehicle created: $id');
       emit(
         state.copyWith(
           viewStatus: VehicleViewStatus.loaded,
@@ -147,7 +164,8 @@ class VehicleCubit extends Cubit<VehicleState> {
       );
       await selectVehicle(id);
       await loadVehicles();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('createVehicleWithChecklist failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -166,6 +184,7 @@ class VehicleCubit extends Cubit<VehicleState> {
     String? notes,
     required String performedBy,
   }) async {
+    _log.i('updateVehicle($vehicleId, status: ${status?.name})');
     emit(
       state.copyWith(viewStatus: VehicleViewStatus.saving, errorMessage: null),
     );
@@ -186,7 +205,8 @@ class VehicleCubit extends Cubit<VehicleState> {
         performedBy: performedBy,
       );
       await selectVehicle(vehicleId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('updateVehicle failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -195,6 +215,7 @@ class VehicleCubit extends Cubit<VehicleState> {
     required String vehicleId,
     required String performedBy,
   }) async {
+    _log.i('retireVehicle($vehicleId)');
     emit(
       state.copyWith(viewStatus: VehicleViewStatus.saving, errorMessage: null),
     );
@@ -213,7 +234,8 @@ class VehicleCubit extends Cubit<VehicleState> {
         ),
       );
       await loadVehicles();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('retireVehicle failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -222,6 +244,7 @@ class VehicleCubit extends Cubit<VehicleState> {
     required String vehicleId,
     required String performedBy,
   }) async {
+    _log.i('markVehicleActive($vehicleId)');
     emit(
       state.copyWith(viewStatus: VehicleViewStatus.saving, errorMessage: null),
     );
@@ -241,7 +264,8 @@ class VehicleCubit extends Cubit<VehicleState> {
       );
       await selectVehicle(vehicleId);
       await loadVehicles();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('markVehicleActive failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -250,6 +274,7 @@ class VehicleCubit extends Cubit<VehicleState> {
     required String vehicleId,
     required String performedBy,
   }) async {
+    _log.i('markVehicleInactive($vehicleId)');
     emit(
       state.copyWith(viewStatus: VehicleViewStatus.saving, errorMessage: null),
     );
@@ -269,12 +294,14 @@ class VehicleCubit extends Cubit<VehicleState> {
       );
       await selectVehicle(vehicleId);
       await loadVehicles();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('markVehicleInactive failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> loadChecklistItemsForTemplate(String templateId) async {
+    _log.t('loadChecklistItemsForTemplate($templateId)');
     emit(
       state.copyWith(viewStatus: VehicleViewStatus.loading, errorMessage: null),
     );
@@ -290,7 +317,8 @@ class VehicleCubit extends Cubit<VehicleState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadChecklistItemsForTemplate failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -301,6 +329,9 @@ class VehicleCubit extends Cubit<VehicleState> {
     required String createdBy,
     String? deactivationReason,
   }) async {
+    _log.i(
+      'createNewChecklistVersionForVehicle($vehicleId, ${checklistItems.length} items)',
+    );
     emit(
       state.copyWith(viewStatus: VehicleViewStatus.saving, errorMessage: null),
     );
@@ -313,7 +344,8 @@ class VehicleCubit extends Cubit<VehicleState> {
         deactivationReason: deactivationReason,
       );
       await selectVehicle(vehicleId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('createNewChecklistVersionForVehicle failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -324,6 +356,7 @@ class VehicleCubit extends Cubit<VehicleState> {
     required String deactivatedBy,
     String? deactivationReason,
   }) async {
+    _log.i('deactivateChecklistTemplate($templateId, vehicle: $vehicleId)');
     emit(
       state.copyWith(viewStatus: VehicleViewStatus.saving, errorMessage: null),
     );
@@ -335,7 +368,8 @@ class VehicleCubit extends Cubit<VehicleState> {
         deactivationReason: deactivationReason,
       );
       await selectVehicle(vehicleId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('deactivateChecklistTemplate failed', error, stackTrace);
       _emitFailure(error);
     }
   }

@@ -1,21 +1,26 @@
 import 'package:bloc/bloc.dart';
 
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/payload/domain/entities/payload_entity.dart';
 import 'package:the_audit/features/payload/domain/repositories/payload_repository.dart';
 import 'payload_state.dart';
 
 class PayloadCubit extends Cubit<PayloadState> {
+  static const _log = AppLogger('PayloadCubit');
+
   final PayloadRepository _repository;
 
   PayloadCubit(this._repository) : super(PayloadState.initial());
 
   Future<void> loadPayloads() async {
+    _log.t('loadPayloads()');
     emit(
       state.copyWith(viewStatus: PayloadViewStatus.loading, errorMessage: null),
     );
 
     try {
       final payloads = await _repository.getAllPayloads();
+      _log.d('${payloads.length} payloads loaded');
       emit(
         state.copyWith(
           viewStatus: PayloadViewStatus.loaded,
@@ -23,12 +28,14 @@ class PayloadCubit extends Cubit<PayloadState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadPayloads failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> searchPayloads(String query) async {
+    _log.t('searchPayloads("$query")');
     emit(
       state.copyWith(
         viewStatus: PayloadViewStatus.loading,
@@ -48,12 +55,14 @@ class PayloadCubit extends Cubit<PayloadState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('searchPayloads failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> selectPayload(String payloadId) async {
+    _log.t('selectPayload($payloadId)');
     emit(
       state.copyWith(viewStatus: PayloadViewStatus.loading, errorMessage: null),
     );
@@ -70,12 +79,14 @@ class PayloadCubit extends Cubit<PayloadState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('selectPayload failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> loadPayloadWithCompatibility(String payloadId) async {
+    _log.t('loadPayloadWithCompatibility($payloadId)');
     emit(
       state.copyWith(viewStatus: PayloadViewStatus.loading, errorMessage: null),
     );
@@ -92,12 +103,14 @@ class PayloadCubit extends Cubit<PayloadState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadPayloadWithCompatibility failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> loadPayloadsCompatibleWithVehicleType(String vehicleType) async {
+    _log.t('loadPayloadsCompatibleWithVehicleType($vehicleType)');
     emit(
       state.copyWith(viewStatus: PayloadViewStatus.loading, errorMessage: null),
     );
@@ -113,7 +126,8 @@ class PayloadCubit extends Cubit<PayloadState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadPayloadsCompatibleWithVehicleType failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -121,6 +135,7 @@ class PayloadCubit extends Cubit<PayloadState> {
   Future<void> loadPayloadsExplicitlyCompatibleWithVehicleType(
     String vehicleType,
   ) async {
+    _log.t('loadPayloadsExplicitlyCompatibleWithVehicleType($vehicleType)');
     emit(
       state.copyWith(viewStatus: PayloadViewStatus.loading, errorMessage: null),
     );
@@ -135,7 +150,12 @@ class PayloadCubit extends Cubit<PayloadState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e(
+        'loadPayloadsExplicitlyCompatibleWithVehicleType failed',
+        error,
+        stackTrace,
+      );
       _emitFailure(error);
     }
   }
@@ -150,6 +170,7 @@ class PayloadCubit extends Cubit<PayloadState> {
     required String performedBy,
     List<String> compatibleVehicleTypes = const [],
   }) async {
+    _log.i('createPayload(id: $payloadId, category: ${category.name})');
     emit(
       state.copyWith(viewStatus: PayloadViewStatus.saving, errorMessage: null),
     );
@@ -165,6 +186,7 @@ class PayloadCubit extends Cubit<PayloadState> {
         performedBy: performedBy,
         compatibleVehicleTypes: compatibleVehicleTypes,
       );
+      _log.d('payload created: $id');
       final payload = await _repository.getPayloadById(id);
       emit(
         state.copyWith(
@@ -178,7 +200,8 @@ class PayloadCubit extends Cubit<PayloadState> {
         ),
       );
       await loadPayloads();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('createPayload failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -192,6 +215,7 @@ class PayloadCubit extends Cubit<PayloadState> {
     PayloadStatus? status,
     required String performedBy,
   }) async {
+    _log.i('updatePayload($payloadId, status: ${status?.name})');
     emit(
       state.copyWith(viewStatus: PayloadViewStatus.saving, errorMessage: null),
     );
@@ -207,7 +231,8 @@ class PayloadCubit extends Cubit<PayloadState> {
         performedBy: performedBy,
       );
       await selectPayload(payloadId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('updatePayload failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -216,6 +241,7 @@ class PayloadCubit extends Cubit<PayloadState> {
     required String payloadId,
     required String performedBy,
   }) async {
+    _log.i('retirePayload($payloadId)');
     emit(
       state.copyWith(viewStatus: PayloadViewStatus.saving, errorMessage: null),
     );
@@ -233,7 +259,8 @@ class PayloadCubit extends Cubit<PayloadState> {
         ),
       );
       await loadPayloads();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('retirePayload failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -243,6 +270,7 @@ class PayloadCubit extends Cubit<PayloadState> {
     required List<String> compatibleVehicleTypes,
     required String performedBy,
   }) async {
+    _log.i('replaceCompatibility($payloadId, $compatibleVehicleTypes)');
     emit(
       state.copyWith(viewStatus: PayloadViewStatus.saving, errorMessage: null),
     );
@@ -261,7 +289,8 @@ class PayloadCubit extends Cubit<PayloadState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('replaceCompatibility failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -271,6 +300,7 @@ class PayloadCubit extends Cubit<PayloadState> {
     required String vehicleType,
     required String performedBy,
   }) async {
+    _log.i('addCompatibility($payloadId, $vehicleType)');
     emit(
       state.copyWith(viewStatus: PayloadViewStatus.saving, errorMessage: null),
     );
@@ -291,7 +321,8 @@ class PayloadCubit extends Cubit<PayloadState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('addCompatibility failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -301,6 +332,7 @@ class PayloadCubit extends Cubit<PayloadState> {
     required String vehicleType,
     required String performedBy,
   }) async {
+    _log.i('removeCompatibility($payloadId, $vehicleType)');
     emit(
       state.copyWith(viewStatus: PayloadViewStatus.saving, errorMessage: null),
     );
@@ -321,7 +353,8 @@ class PayloadCubit extends Cubit<PayloadState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('removeCompatibility failed', error, stackTrace);
       _emitFailure(error);
     }
   }

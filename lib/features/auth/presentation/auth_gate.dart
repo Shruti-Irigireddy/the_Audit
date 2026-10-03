@@ -3,11 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_state.dart';
 import 'package:the_audit/features/auth/presentation/login.dart';
 import 'package:the_audit/features/auth/presentation/splash_screen.dart';
 import 'package:the_audit/features/dashboard/presentation/home.dart';
+
+const _log = AppLogger('AuthGate');
 
 class AuthGate extends StatefulWidget {
   final AppDatabase database;
@@ -24,13 +27,31 @@ class _AuthGateState extends State<AuthGate> {
   static const _minimumSplash = SplashScreen.zoomDuration;
 
   bool _splashElapsed = false;
+  Type? _lastPage;
 
   @override
   void initState() {
     super.initState();
+    _log.t('initState');
     Future.delayed(_minimumSplash, () {
+      _log.t('minimum splash elapsed');
       if (mounted) setState(() => _splashElapsed = true);
     });
+  }
+
+  @override
+  void dispose() {
+    _log.t('dispose');
+    super.dispose();
+  }
+
+  void _logPage(Widget page, AuthState state) {
+    if (page.runtimeType == _lastPage) return;
+    _lastPage = page.runtimeType;
+    _log.i(
+      'showing ${page.runtimeType} (status: ${state.viewStatus.name}, '
+      'authenticated: ${state.isAuthenticated})',
+    );
   }
 
   @override
@@ -57,6 +78,8 @@ class _AuthGateState extends State<AuthGate> {
               authCubit: widget.authCubit,
             );
           }
+
+          _logPage(page, state);
 
           return AnimatedSwitcher(
             duration: const Duration(milliseconds: 500),

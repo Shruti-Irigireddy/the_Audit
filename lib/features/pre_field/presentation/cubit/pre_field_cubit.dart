@@ -1,15 +1,19 @@
 import 'package:bloc/bloc.dart';
 
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/pre_field/domain/dtos/pre_field_dtos.dart';
 import 'package:the_audit/features/pre_field/domain/repositories/pre_field_repository.dart';
 import 'pre_field_state.dart';
 
 class PreFieldCubit extends Cubit<PreFieldState> {
+  static const _log = AppLogger('PreFieldCubit');
+
   final PreFieldRepository _repository;
 
   PreFieldCubit(this._repository) : super(PreFieldState.initial());
 
   Future<void> loadInProgressSessions() async {
+    _log.t('loadInProgressSessions()');
     emit(
       state.copyWith(
         viewStatus: PreFieldViewStatus.loading,
@@ -19,6 +23,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
 
     try {
       final sessions = await _repository.getInProgressFieldSessions();
+      _log.d('${sessions.length} in-progress sessions loaded');
       emit(
         state.copyWith(
           viewStatus: PreFieldViewStatus.loaded,
@@ -26,7 +31,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadInProgressSessions failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -41,6 +47,9 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required String sessionStatus,
     required String createdBy,
   }) async {
+    _log.i(
+      'createFieldSession(id: $sessionId, mission: $missionType, status: $sessionStatus)',
+    );
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -56,13 +65,16 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         sessionStatus: sessionStatus,
         createdBy: createdBy,
       );
+      _log.i('session created: $id');
       await loadSession(id);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('createFieldSession failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> loadSession(String sessionId) async {
+    _log.t('loadSession($sessionId)');
     emit(
       state.copyWith(
         viewStatus: PreFieldViewStatus.loading,
@@ -80,6 +92,11 @@ class PreFieldCubit extends Cubit<PreFieldState> {
       );
       final compatibilityIssues = await _repository
           .getPayloadCompatibilityIssues(sessionId);
+      _log.d(
+        'session $sessionId: ${users.length} users, ${vehicles.length} vehicles, '
+        '${batteries.length} batteries, ${equipmentChecks.length} checks, '
+        '${compatibilityIssues.length} compatibility issues',
+      );
 
       emit(
         state.copyWith(
@@ -93,12 +110,14 @@ class PreFieldCubit extends Cubit<PreFieldState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadSession failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> loadSummary(String sessionId) async {
+    _log.t('loadSummary($sessionId)');
     emit(
       state.copyWith(
         viewStatus: PreFieldViewStatus.loading,
@@ -116,12 +135,14 @@ class PreFieldCubit extends Cubit<PreFieldState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadSummary failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> loadEquipmentList() async {
+    _log.t('loadEquipmentList()');
     emit(
       state.copyWith(
         viewStatus: PreFieldViewStatus.loading,
@@ -138,7 +159,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadEquipmentList failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -147,6 +169,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required String sessionId,
     required String closedBy,
   }) async {
+    _log.i('closeFieldSession($sessionId)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -156,6 +179,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         sessionId: sessionId,
         closedBy: closedBy,
       );
+      _log.i('session closed: $sessionId');
       emit(
         state.copyWith(
           viewStatus: PreFieldViewStatus.loaded,
@@ -164,7 +188,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         ),
       );
       await loadInProgressSessions();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('closeFieldSession failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -178,6 +203,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     String? missionType,
     required String performedBy,
   }) async {
+    _log.i('updateFieldSessionBasicInfo($sessionId)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -193,7 +219,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadSession(sessionId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('updateFieldSessionBasicInfo failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -204,6 +231,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required String role,
     required String performedBy,
   }) async {
+    _log.i('addUserToSession($sessionId, role: $role)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -216,7 +244,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadSession(sessionId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('addUserToSession failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -226,6 +255,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required String sessionUserId,
     required String performedBy,
   }) async {
+    _log.i('removeUserFromSession($sessionId, $sessionUserId)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -236,7 +266,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadSession(sessionId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('removeUserFromSession failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -246,6 +277,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required List<SessionUserDraft> users,
     required String performedBy,
   }) async {
+    _log.i('replaceSessionUsers($sessionId, ${users.length} users)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -257,7 +289,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadSession(sessionId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('replaceSessionUsers failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -278,6 +311,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     String? objective,
     required String performedBy,
   }) async {
+    _log.i('addVehicleToSession($sessionId, vehicle: $vehicleId)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -290,7 +324,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadSession(sessionId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('addVehicleToSession failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -300,6 +335,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required String sessionVehicleId,
     required String performedBy,
   }) async {
+    _log.i('removeVehicleFromSession($sessionId, $sessionVehicleId)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -310,7 +346,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadSession(sessionId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('removeVehicleFromSession failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -321,6 +358,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     String? objective,
     required String performedBy,
   }) async {
+    _log.i('updateSessionVehicleObjective($sessionId, $sessionVehicleId)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -332,7 +370,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadSession(sessionId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('updateSessionVehicleObjective failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -342,6 +381,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required List<SessionVehicleDraft> vehicles,
     required String performedBy,
   }) async {
+    _log.i('replaceSessionVehicles($sessionId, ${vehicles.length} vehicles)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -353,7 +393,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadSession(sessionId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('replaceSessionVehicles failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -367,6 +408,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
   }
 
   Future<void> loadPayloadsForSessionVehicle(String sessionVehicleId) async {
+    _log.t('loadPayloadsForSessionVehicle($sessionVehicleId)');
     emit(
       state.copyWith(
         viewStatus: PreFieldViewStatus.loading,
@@ -385,7 +427,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadPayloadsForSessionVehicle failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -395,6 +438,9 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required String payloadId,
     required String performedBy,
   }) async {
+    _log.i(
+      'addPayloadToSessionVehicle($sessionVehicleId, payload: $payloadId)',
+    );
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -406,7 +452,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadPayloadsForSessionVehicle(sessionVehicleId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('addPayloadToSessionVehicle failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -416,6 +463,9 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required String payloadId,
     required String performedBy,
   }) async {
+    _log.i(
+      'removePayloadFromSessionVehicle($sessionVehicleId, payload: $payloadId)',
+    );
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -427,7 +477,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadPayloadsForSessionVehicle(sessionVehicleId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('removePayloadFromSessionVehicle failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -437,6 +488,9 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required List<String> payloadIds,
     required String performedBy,
   }) async {
+    _log.i(
+      'replacePayloadsForSessionVehicle($sessionVehicleId, ${payloadIds.length} payloads)',
+    );
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -448,7 +502,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadPayloadsForSessionVehicle(sessionVehicleId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('replacePayloadsForSessionVehicle failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -462,6 +517,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required String batteryId,
     required String performedBy,
   }) async {
+    _log.i('addBatteryToSession($sessionId, battery: $batteryId)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -473,7 +529,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadSession(sessionId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('addBatteryToSession failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -483,6 +540,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required String sessionBatteryId,
     required String performedBy,
   }) async {
+    _log.i('removeBatteryFromSession($sessionId, $sessionBatteryId)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -493,7 +551,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadSession(sessionId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('removeBatteryFromSession failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -503,6 +562,9 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required List<SessionBatteryDraft> batteries,
     required String performedBy,
   }) async {
+    _log.i(
+      'replaceSessionBatteries($sessionId, ${batteries.length} batteries)',
+    );
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -514,7 +576,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadSession(sessionId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('replaceSessionBatteries failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -523,6 +586,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required String sessionId,
     required String checkedBy,
   }) async {
+    _log.i('createEquipmentChecksForSession($sessionId)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -533,7 +597,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         checkedBy: checkedBy,
       );
       await loadSession(sessionId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('createEquipmentChecksForSession failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -545,6 +610,9 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     String? notes,
     required String checkedBy,
   }) async {
+    _log.i(
+      'updateEquipmentCheck($sessionId, $equipmentCheckId, packed: $isPacked)',
+    );
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -557,7 +625,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         checkedBy: checkedBy,
       );
       await loadSession(sessionId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('updateEquipmentCheck failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -569,6 +638,9 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     String? notes,
     required String checkedBy,
   }) async {
+    _log.i(
+      'addCustomEquipmentCheckToSession($sessionId, $equipmentId, packed: $isPacked)',
+    );
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -582,7 +654,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         checkedBy: checkedBy,
       );
       await loadSession(sessionId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('addCustomEquipmentCheckToSession failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -597,6 +670,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required String category,
     required String performedBy,
   }) async {
+    _log.i('createEquipmentItem(id: $id, category: $category)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -609,7 +683,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadEquipmentList();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('createEquipmentItem failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -621,6 +696,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     bool? isActive,
     required String performedBy,
   }) async {
+    _log.i('updateEquipmentItem($equipmentId, active: $isActive)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -634,7 +710,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadEquipmentList();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('updateEquipmentItem failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -643,6 +720,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required String equipmentId,
     required String performedBy,
   }) async {
+    _log.i('deactivateEquipmentItem($equipmentId)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -653,7 +731,8 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         performedBy: performedBy,
       );
       await loadEquipmentList();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('deactivateEquipmentItem failed', error, stackTrace);
       _emitFailure(error);
     }
   }

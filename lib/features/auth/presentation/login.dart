@@ -1,17 +1,16 @@
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:flutter/material.dart';
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
+
+const _log = AppLogger('Login');
 
 class LoginPage extends StatefulWidget {
   final AppDatabase database;
   final AuthCubit authCubit;
-  const LoginPage({
-    super.key,
-    required this.database,
-    required this.authCubit,
-  });
+  const LoginPage({super.key, required this.database, required this.authCubit});
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -24,50 +23,57 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   String? _errorMessage;
 
-  Future<bool> _login() async {
+  Future<bool> _login() => _log.trace('login', () async {
+    _log.i('login attempt ${AppLogger.mask(_emailController.text.trim())}');
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
     try {
-      final firebase_auth.UserCredential userCredential =
-      await firebase_auth.FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
+      final firebase_auth.UserCredential userCredential = await firebase_auth
+          .FirebaseAuth
+          .instance
+          .signInWithEmailAndPassword(
+            email: _emailController.text.trim(),
+            password: _passwordController.text.trim(),
+          );
 
       final firebase_auth.User? user = userCredential.user;
       if (user == null) {
-      setState(() {
-        _errorMessage = "Login failed. User not found.";
-      });
-      return false;
+        _log.w('login returned no user');
+        setState(() {
+          _errorMessage = "Login failed. User not found.";
+        });
+        return false;
       }
 
       await widget.authCubit.saveSession(
         uid: user.uid,
         email: user.email ?? _emailController.text.trim(),
       );
+      _log.i('login succeeded ${AppLogger.mask(user.email)}');
       return true;
-
-    } on firebase_auth.FirebaseAuthException catch (e) {
+    } on firebase_auth.FirebaseAuthException catch (e, stackTrace) {
+      _log.w('login failed: ${e.code}', e, stackTrace);
       if (mounted) {
-      setState(() {
-        _errorMessage = e.message;
-      });
+        setState(() {
+          _errorMessage = e.message;
+        });
       }
       return false;
     } finally {
       if (mounted) {
-      setState(() {
-        _isLoading = false;
-      });
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
-  }
-  }
+  });
   Future<void> _forgotPassword() async {
-    final TextEditingController forgotPasswordEmailController = TextEditingController();
+    _log.d('forgot password opened');
+    final TextEditingController forgotPasswordEmailController =
+        TextEditingController();
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
@@ -80,16 +86,22 @@ class _LoginPageState extends State<LoginPage> {
           actions: [
             TextButton(
               onPressed: () async {
+                _log.i(
+                  'password reset requested ${AppLogger.mask(forgotPasswordEmailController.text)}',
+                );
                 try {
-                  await firebase_auth.FirebaseAuth.instance.sendPasswordResetEmail(
-                    email: forgotPasswordEmailController.text,
-                  );
+                  await firebase_auth.FirebaseAuth.instance
+                      .sendPasswordResetEmail(
+                        email: forgotPasswordEmailController.text,
+                      );
+                  _log.i('password reset email sent');
                   if (!mounted || !dialogContext.mounted) return;
                   Navigator.of(dialogContext).pop();
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Password reset email sent.')),
                   );
-                } on firebase_auth.FirebaseAuthException catch (e) {
+                } on firebase_auth.FirebaseAuthException catch (e, stackTrace) {
+                  _log.w('password reset failed: ${e.code}', e, stackTrace);
                   if (!mounted || !dialogContext.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text(e.message ?? 'An error occurred.')),
@@ -100,6 +112,7 @@ class _LoginPageState extends State<LoginPage> {
             ),
             TextButton(
               onPressed: () {
+                _log.d('forgot password cancelled');
                 Navigator.of(dialogContext).pop();
               },
               child: const Text('Cancel'),
@@ -112,7 +125,14 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _log.t('initState');
+  }
+
+  @override
   void dispose() {
+    _log.t('dispose');
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -121,10 +141,7 @@ class _LoginPageState extends State<LoginPage> {
   Widget _fieldLabel(String text) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Text(
-        text,
-        style: AppAuthTheme.fieldLabel,
-      ),
+      child: Text(text, style: AppAuthTheme.fieldLabel),
     );
   }
 
@@ -198,10 +215,7 @@ class _LoginPageState extends State<LoginPage> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'THE AUDIT',
-          style: AppAuthTheme.title(layout.titleSize),
-        ),
+        Text('THE AUDIT', style: AppAuthTheme.title(layout.titleSize)),
         const SizedBox(height: 28),
         _fieldLabel('Email'),
         TextField(
@@ -224,10 +238,7 @@ class _LoginPageState extends State<LoginPage> {
         ),
         const SizedBox(height: 16),
         if (_errorMessage != null)
-          Text(
-            _errorMessage!,
-            style: AppAuthTheme.error,
-          ),
+          Text(_errorMessage!, style: AppAuthTheme.error),
         const SizedBox(height: 16),
         SizedBox(
           height: AppSizes.buttonHeight,

@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/core/utils/theme.dart';
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:the_audit/features/post_flight/presentation/post-flight.dart';
 import 'package:the_audit/features/pre_field/data/repositories/pre_field_repository_impl.dart';
@@ -18,6 +19,7 @@ import 'package:the_audit/features/pre_flight/presentation/cubit/pre_flight_stat
 import 'package:the_audit/features/pre_flight/presentation/pre-flight.dart';
 
 const _uuid = Uuid();
+const _log = AppLogger('SessionLoop');
 
 class SessionLoopPage extends StatefulWidget {
   final AppDatabase database;
@@ -50,6 +52,7 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
   @override
   void initState() {
     super.initState();
+    _log.t('initState session ${widget.sessionId}');
     _preFieldCubit = PreFieldCubit(
       PreFieldRepositoryImpl(widget.database.preFieldDao),
     )..loadSession(widget.sessionId);
@@ -60,6 +63,7 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
 
   @override
   void dispose() {
+    _log.t('dispose');
     _objectiveController.dispose();
     for (final controller in _batteryVoltageControllers.values) {
       controller.dispose();
@@ -88,15 +92,15 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
               Row(
                 children: [
                   IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () {
+                      _log.d('back tapped');
+                      Navigator.of(context).pop();
+                    },
                     icon: const Icon(Icons.arrow_back),
                     tooltip: 'Back',
                   ),
                   const Expanded(
-                    child: Text(
-                      'Session loop',
-                      style: AppTextStyles.pageTitle,
-                    ),
+                    child: Text('Session loop', style: AppTextStyles.pageTitle),
                   ),
                 ],
               ),
@@ -114,6 +118,7 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
                     batteryPercentControllers: _batteryPercentControllers,
                     objectiveController: _objectiveController,
                     onVehicleChanged: (value) {
+                      _log.d('sortie vehicle: $value');
                       setState(() {
                         _selectedSessionVehicleId = value;
                         _selectedPayloadIds = {};
@@ -123,6 +128,7 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
                       }
                     },
                     onPicChanged: (value) {
+                      _log.d('sortie PIC: $value');
                       setState(() => _selectedPicUserId = value);
                     },
                     onVoChanged: _toggleVo,
@@ -167,62 +173,76 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
   }
 
   Future<void> _createSortie() async {
-    final sessionVehicleId = _selectedSessionVehicleId;
-    final picUserId = _selectedPicUserId;
+    _log.d('prepare pre-flight tapped');
+    await _log.trace('createSortie', () async {
+      final sessionVehicleId = _selectedSessionVehicleId;
+      final picUserId = _selectedPicUserId;
 
-    if (sessionVehicleId == null || picUserId == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Select vehicle and PIC.')));
-      return;
-    }
-
-    final performedBy = await _performedBy();
-
-    await _preFlightCubit.createSortie(
-      sessionId: widget.sessionId,
-      sessionVehicleId: sessionVehicleId,
-      picUserId: picUserId,
-      objective: _nullable(_objectiveController.text),
-      performedBy: performedBy,
-      selectedPayloadIds: _selectedPayloadIds.toList(),
-    );
-    final flightId = _preFlightCubit.state.selectedSortie?.flightId;
-    if (flightId != null) {
-      for (final voUserId in _selectedVoUserIds) {
-        await _preFlightCubit.addUserToSortie(
-          flightId: flightId,
-          userId: voUserId,
-          role: 'VO',
-          performedBy: performedBy,
+      if (sessionVehicleId == null || picUserId == null) {
+        _log.w('create sortie: vehicle or PIC missing');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Select vehicle and PIC.')),
         );
+        return;
       }
 
-      await _preFlightCubit.replaceAllSortieBatteries(
-        flightId: flightId,
-        batteries: [
-          for (final batteryId in _selectedBatteryIds)
-            SortieBatteryDraft(
-              id: _uuid.v4(),
-              batteryId: batteryId,
-              voltageStart: double.tryParse(
-                _batteryVoltageControllers[batteryId]?.text.trim() ?? '',
-              ),
-              percentStart: int.tryParse(
-                _batteryPercentControllers[batteryId]?.text.trim() ?? '',
-              ),
-            ),
-        ],
-        performedBy: performedBy,
-      );
+      final performedBy = await _performedBy();
 
-      if (!mounted) return;
-      await _openPreFlight(flightId);
-    }
-    await _preFlightCubit.loadSortiesForSession(widget.sessionId);
+      _log.d(
+        'creating sortie: vehicle $sessionVehicleId, '
+        '${_selectedVoUserIds.length} VOs, '
+        '${_selectedPayloadIds.length} payloads, '
+        '${_selectedBatteryIds.length} batteries',
+      );
+      await _preFlightCubit.createSortie(
+        sessionId: widget.sessionId,
+        sessionVehicleId: sessionVehicleId,
+        picUserId: picUserId,
+        objective: _nullable(_objectiveController.text),
+        performedBy: performedBy,
+        selectedPayloadIds: _selectedPayloadIds.toList(),
+      );
+      final flightId = _preFlightCubit.state.selectedSortie?.flightId;
+      if (flightId != null) {
+        _log.i('sortie created $flightId');
+        for (final voUserId in _selectedVoUserIds) {
+          await _preFlightCubit.addUserToSortie(
+            flightId: flightId,
+            userId: voUserId,
+            role: 'VO',
+            performedBy: performedBy,
+          );
+        }
+
+        await _preFlightCubit.replaceAllSortieBatteries(
+          flightId: flightId,
+          batteries: [
+            for (final batteryId in _selectedBatteryIds)
+              SortieBatteryDraft(
+                id: _uuid.v4(),
+                batteryId: batteryId,
+                voltageStart: double.tryParse(
+                  _batteryVoltageControllers[batteryId]?.text.trim() ?? '',
+                ),
+                percentStart: int.tryParse(
+                  _batteryPercentControllers[batteryId]?.text.trim() ?? '',
+                ),
+              ),
+          ],
+          performedBy: performedBy,
+        );
+
+        if (!mounted) return;
+        await _openPreFlight(flightId);
+      } else {
+        _log.w('create sortie: no sortie selected after create');
+      }
+      await _preFlightCubit.loadSortiesForSession(widget.sessionId);
+    });
   }
 
   void _toggleVo(String userId, bool selected) {
+    _log.d('VO $userId selected: $selected');
     setState(() {
       final values = {..._selectedVoUserIds};
       selected ? values.add(userId) : values.remove(userId);
@@ -231,6 +251,7 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
   }
 
   void _togglePayload(String payloadId, bool selected) {
+    _log.d('payload $payloadId selected: $selected');
     setState(() {
       final values = {..._selectedPayloadIds};
       selected ? values.add(payloadId) : values.remove(payloadId);
@@ -239,6 +260,7 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
   }
 
   void _toggleBattery(String batteryId, bool selected) {
+    _log.d('battery $batteryId selected: $selected');
     setState(() {
       final values = {..._selectedBatteryIds};
       selected ? values.add(batteryId) : values.remove(batteryId);
@@ -255,8 +277,10 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
   }
 
   Future<void> _openPreFlight(String flightId) async {
+    _log.d('open pre-flight $flightId');
     await Navigator.of(context).push(
       MaterialPageRoute(
+        settings: const RouteSettings(name: 'PreFlightChecklist'),
         builder: (_) => PreFlightChecklistPage(
           database: widget.database,
           authCubit: widget.authCubit,
@@ -268,8 +292,10 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
   }
 
   Future<void> _openPostFlight(String flightId) async {
+    _log.d('open post-flight $flightId');
     await Navigator.of(context).push(
       MaterialPageRoute(
+        settings: const RouteSettings(name: 'PostFlightNotes'),
         builder: (_) => PostFlightNotesPage(
           database: widget.database,
           authCubit: widget.authCubit,
@@ -281,11 +307,14 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
   }
 
   Future<void> _closeSession() async {
-    final performedBy = await _performedBy();
-    return _preFieldCubit.closeFieldSession(
-      sessionId: widget.sessionId,
-      closedBy: performedBy,
-    );
+    _log.d('close session tapped');
+    await _log.trace('closeSession', () async {
+      final performedBy = await _performedBy();
+      await _preFieldCubit.closeFieldSession(
+        sessionId: widget.sessionId,
+        closedBy: performedBy,
+      );
+    });
   }
 
   String? _nullable(String value) {
@@ -311,6 +340,7 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
       if (user != null) return user.id;
     }
 
+    _log.w('no local user for ${AppLogger.mask(email)}, using fallback id');
     return uid ?? email ?? 'unknown';
   }
 }
@@ -365,10 +395,7 @@ class _CreateSortieCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Prepare sortie',
-              style: AppTextStyles.sectionTitle,
-            ),
+            const Text('Prepare sortie', style: AppTextStyles.sectionTitle),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               initialValue: selectedSessionVehicleId,

@@ -1,19 +1,24 @@
 import 'package:bloc/bloc.dart';
 
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/records/domain/entities/record_entity.dart';
 import 'package:the_audit/features/records/domain/repositories/records_repository.dart';
 import 'records_state.dart';
 
 class RecordsCubit extends Cubit<RecordsState> {
+  static const _log = AppLogger('RecordsCubit');
+
   final RecordRepository _repository;
 
   RecordsCubit(this._repository) : super(const RecordsState());
 
   Future<void> loadRecentSessions({int limit = 50}) async {
+    _log.t('loadRecentSessions(limit: $limit)');
     emit(state.copyWith(status: RecordsStatus.loading, clearError: true));
 
     try {
       final sessions = await _repository.getRecentSessions(limit: limit);
+      _log.d('${sessions.length} recent sessions loaded');
       emit(
         state.copyWith(
           status: RecordsStatus.loaded,
@@ -21,7 +26,8 @@ class RecordsCubit extends Cubit<RecordsState> {
           clearError: true,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadRecentSessions failed', error, stackTrace);
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
@@ -32,10 +38,12 @@ class RecordsCubit extends Cubit<RecordsState> {
   }
 
   Future<void> loadClosedSessions({int limit = 50}) async {
+    _log.t('loadClosedSessions(limit: $limit)');
     emit(state.copyWith(status: RecordsStatus.loading, clearError: true));
 
     try {
       final sessions = await _repository.getRecentClosedSessions(limit: limit);
+      _log.d('${sessions.length} closed sessions loaded');
       emit(
         state.copyWith(
           status: RecordsStatus.loaded,
@@ -43,7 +51,8 @@ class RecordsCubit extends Cubit<RecordsState> {
           clearError: true,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadClosedSessions failed', error, stackTrace);
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
@@ -54,10 +63,12 @@ class RecordsCubit extends Cubit<RecordsState> {
   }
 
   Future<void> loadInProgressSessions({int limit = 50}) async {
+    _log.t('loadInProgressSessions(limit: $limit)');
     emit(state.copyWith(status: RecordsStatus.loading, clearError: true));
 
     try {
       final sessions = await _repository.getInProgressSessions(limit: limit);
+      _log.d('${sessions.length} in-progress sessions loaded');
       emit(
         state.copyWith(
           status: RecordsStatus.loaded,
@@ -65,7 +76,8 @@ class RecordsCubit extends Cubit<RecordsState> {
           clearError: true,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadInProgressSessions failed', error, stackTrace);
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
@@ -84,6 +96,7 @@ class RecordsCubit extends Cubit<RecordsState> {
     String? picUserId,
     int limit = 50,
   }) async {
+    _log.t('searchSessions("$query", status: $status, vehicle: $vehicleId)');
     emit(state.copyWith(status: RecordsStatus.loading, clearError: true));
 
     try {
@@ -96,6 +109,7 @@ class RecordsCubit extends Cubit<RecordsState> {
         picUserId: picUserId,
         limit: limit,
       );
+      _log.d('search matched ${sessions.length} sessions');
       emit(
         state.copyWith(
           status: RecordsStatus.loaded,
@@ -103,7 +117,8 @@ class RecordsCubit extends Cubit<RecordsState> {
           clearError: true,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('searchSessions failed', error, stackTrace);
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
@@ -114,10 +129,12 @@ class RecordsCubit extends Cubit<RecordsState> {
   }
 
   Future<void> loadSessionRecordView(String sessionId) async {
+    _log.t('loadSessionRecordView($sessionId)');
     emit(state.copyWith(status: RecordsStatus.loading, clearError: true));
 
     try {
       final record = await _repository.getSessionRecordView(sessionId);
+      _log.d('record view loaded: $sessionId');
       emit(
         state.copyWith(
           status: RecordsStatus.loaded,
@@ -125,7 +142,8 @@ class RecordsCubit extends Cubit<RecordsState> {
           clearError: true,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadSessionRecordView failed', error, stackTrace);
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
@@ -142,6 +160,7 @@ class RecordsCubit extends Cubit<RecordsState> {
     required String amendmentText,
     required String createdBy,
   }) async {
+    _log.i('addRecordAmendment($entityType, $entityId)');
     emit(state.copyWith(status: RecordsStatus.loading, clearError: true));
 
     try {
@@ -153,7 +172,8 @@ class RecordsCubit extends Cubit<RecordsState> {
         createdBy: createdBy,
       );
       emit(state.copyWith(status: RecordsStatus.loaded, clearError: true));
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('addRecordAmendment failed', error, stackTrace);
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
@@ -164,6 +184,7 @@ class RecordsCubit extends Cubit<RecordsState> {
   }
 
   Future<void> loadVehicleSortieCount(String vehicleId) async {
+    _log.t('loadVehicleSortieCount($vehicleId)');
     emit(state.copyWith(status: RecordsStatus.loading, clearError: true));
 
     try {
@@ -175,7 +196,8 @@ class RecordsCubit extends Cubit<RecordsState> {
           clearError: true,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadVehicleSortieCount failed', error, stackTrace);
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
@@ -186,6 +208,7 @@ class RecordsCubit extends Cubit<RecordsState> {
   }
 
   Future<void> loadSiteSessionCount(String locationName) async {
+    _log.t('loadSiteSessionCount($locationName)');
     emit(state.copyWith(status: RecordsStatus.loading, clearError: true));
 
     try {
@@ -197,7 +220,8 @@ class RecordsCubit extends Cubit<RecordsState> {
           clearError: true,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadSiteSessionCount failed', error, stackTrace);
       emit(
         state.copyWith(
           status: RecordsStatus.failure,

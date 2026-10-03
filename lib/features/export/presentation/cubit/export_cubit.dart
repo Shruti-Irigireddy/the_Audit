@@ -1,11 +1,14 @@
 import 'package:bloc/bloc.dart';
 
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/export/domain/repositories/export_repository.dart';
 import 'package:the_audit/features/export/domain/services/export_generation_service.dart';
 import 'package:the_audit/features/export/domain/services/export_share_service.dart';
 import 'export_state.dart';
 
 class ExportCubit extends Cubit<ExportState> {
+  static const _log = AppLogger('ExportCubit');
+
   final ExportRepository _repository;
   final ExportGenerationService? _generationService;
   final ExportShareService? _shareService;
@@ -19,6 +22,7 @@ class ExportCubit extends Cubit<ExportState> {
        super(const ExportState());
 
   Future<void> loadExports({int limit = 50}) async {
+    _log.t('loadExports(limit: $limit)');
     emit(state.copyWith(status: ExportStatus.loading, clearError: true));
 
     try {
@@ -32,6 +36,10 @@ class ExportCubit extends Cubit<ExportState> {
       );
       final pendingCount = await _repository.countPendingExports();
       final failedCount = await _repository.countFailedExports();
+      _log.d(
+        'exports loaded: pending=$pendingCount failed=$failedCount '
+        'completed=${completedExports.length}',
+      );
 
       emit(
         state.copyWith(
@@ -45,7 +53,8 @@ class ExportCubit extends Cubit<ExportState> {
           clearError: true,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadExports failed', error, stackTrace);
       emit(
         state.copyWith(
           status: ExportStatus.failure,
@@ -59,6 +68,7 @@ class ExportCubit extends Cubit<ExportState> {
     required String entityType,
     required String entityId,
   }) async {
+    _log.t('loadExportsForEntity($entityType, $entityId)');
     emit(state.copyWith(status: ExportStatus.loading, clearError: true));
 
     try {
@@ -73,7 +83,8 @@ class ExportCubit extends Cubit<ExportState> {
           clearError: true,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadExportsForEntity failed', error, stackTrace);
       emit(
         state.copyWith(
           status: ExportStatus.failure,
@@ -89,6 +100,7 @@ class ExportCubit extends Cubit<ExportState> {
     required String exportFormat,
     required String generatedBy,
   }) async {
+    _log.i('createExportRecord($entityType, $entityId, $exportFormat)');
     emit(state.copyWith(status: ExportStatus.loading, clearError: true));
 
     try {
@@ -98,6 +110,7 @@ class ExportCubit extends Cubit<ExportState> {
         exportFormat: exportFormat,
         generatedBy: generatedBy,
       );
+      _log.d('export record created: $exportId');
       final export = await _repository.getExportById(exportId);
       emit(
         state.copyWith(
@@ -106,7 +119,8 @@ class ExportCubit extends Cubit<ExportState> {
           clearError: true,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('createExportRecord failed', error, stackTrace);
       emit(
         state.copyWith(
           status: ExportStatus.failure,
@@ -117,6 +131,7 @@ class ExportCubit extends Cubit<ExportState> {
   }
 
   Future<void> loadExport(int exportId) async {
+    _log.t('loadExport($exportId)');
     emit(state.copyWith(status: ExportStatus.loading, clearError: true));
 
     try {
@@ -128,7 +143,8 @@ class ExportCubit extends Cubit<ExportState> {
           clearError: true,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadExport failed', error, stackTrace);
       emit(
         state.copyWith(
           status: ExportStatus.failure,
@@ -143,6 +159,9 @@ class ExportCubit extends Cubit<ExportState> {
     required String entityId,
     required String exportFormat,
   }) async {
+    _log.t(
+      'loadLatestCompletedExportForEntity($entityType, $entityId, $exportFormat)',
+    );
     emit(state.copyWith(status: ExportStatus.loading, clearError: true));
 
     try {
@@ -158,7 +177,8 @@ class ExportCubit extends Cubit<ExportState> {
           clearError: true,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadLatestCompletedExportForEntity failed', error, stackTrace);
       emit(
         state.copyWith(
           status: ExportStatus.failure,
@@ -174,6 +194,9 @@ class ExportCubit extends Cubit<ExportState> {
     required String generatedBy,
     bool shareAfterGenerate = false,
   }) async {
+    _log.i(
+      'generateSessionExport($sessionId, $exportFormat, share: $shareAfterGenerate)',
+    );
     await _generateExport(
       entityType: 'FIELD_SESSION',
       entityId: sessionId,
@@ -193,6 +216,9 @@ class ExportCubit extends Cubit<ExportState> {
     required String generatedBy,
     bool shareAfterGenerate = false,
   }) async {
+    _log.i(
+      'generateFlightExport($flightId, $exportFormat, share: $shareAfterGenerate)',
+    );
     await _generateExport(
       entityType: 'SORTIE',
       entityId: flightId,
@@ -210,6 +236,7 @@ class ExportCubit extends Cubit<ExportState> {
     required int exportId,
     required String performedBy,
   }) async {
+    _log.i('retryExport($exportId)');
     emit(state.copyWith(status: ExportStatus.loading, clearError: true));
 
     try {
@@ -218,7 +245,8 @@ class ExportCubit extends Cubit<ExportState> {
         performedBy: performedBy,
       );
       await loadExports();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('retryExport failed', error, stackTrace);
       emit(
         state.copyWith(
           status: ExportStatus.failure,
@@ -232,6 +260,7 @@ class ExportCubit extends Cubit<ExportState> {
     required int exportId,
     required String performedBy,
   }) async {
+    _log.t('markExportInProgress($exportId)');
     emit(state.copyWith(status: ExportStatus.loading, clearError: true));
 
     try {
@@ -240,7 +269,8 @@ class ExportCubit extends Cubit<ExportState> {
         performedBy: performedBy,
       );
       await loadExport(exportId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('markExportInProgress failed', error, stackTrace);
       emit(
         state.copyWith(
           status: ExportStatus.failure,
@@ -255,6 +285,7 @@ class ExportCubit extends Cubit<ExportState> {
     required String exportLocation,
     required String performedBy,
   }) async {
+    _log.i('markExportCompleted($exportId)');
     emit(state.copyWith(status: ExportStatus.loading, clearError: true));
 
     try {
@@ -264,7 +295,8 @@ class ExportCubit extends Cubit<ExportState> {
         performedBy: performedBy,
       );
       await loadExport(exportId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('markExportCompleted failed', error, stackTrace);
       emit(
         state.copyWith(
           status: ExportStatus.failure,
@@ -279,6 +311,7 @@ class ExportCubit extends Cubit<ExportState> {
     required String errorMessage,
     required String performedBy,
   }) async {
+    _log.i('markExportFailed($exportId)');
     emit(state.copyWith(status: ExportStatus.loading, clearError: true));
 
     try {
@@ -288,7 +321,8 @@ class ExportCubit extends Cubit<ExportState> {
         performedBy: performedBy,
       );
       await loadExport(exportId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('markExportFailed failed', error, stackTrace);
       emit(
         state.copyWith(
           status: ExportStatus.failure,
@@ -299,10 +333,12 @@ class ExportCubit extends Cubit<ExportState> {
   }
 
   Future<void> shareLatestArtifact() async {
+    _log.i('shareLatestArtifact()');
     final shareService = _shareService;
     final artifact = state.latestArtifact;
 
     if (shareService == null) {
+      _log.w('shareLatestArtifact: share service not configured');
       emit(
         state.copyWith(
           status: ExportStatus.failure,
@@ -313,6 +349,7 @@ class ExportCubit extends Cubit<ExportState> {
     }
 
     if (artifact == null) {
+      _log.w('shareLatestArtifact: no artifact to share');
       emit(
         state.copyWith(
           status: ExportStatus.failure,
@@ -327,7 +364,8 @@ class ExportCubit extends Cubit<ExportState> {
     try {
       await shareService.shareExport(artifact);
       emit(state.copyWith(status: ExportStatus.loaded, clearError: true));
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('shareLatestArtifact failed', error, stackTrace);
       emit(
         state.copyWith(
           status: ExportStatus.failure,
@@ -348,6 +386,7 @@ class ExportCubit extends Cubit<ExportState> {
     final generationService = _generationService;
 
     if (generationService == null) {
+      _log.w('_generateExport: generation service not configured');
       emit(
         state.copyWith(
           status: ExportStatus.failure,
@@ -372,8 +411,10 @@ class ExportCubit extends Cubit<ExportState> {
         exportId: exportId,
         performedBy: generatedBy,
       );
+      _log.d('export $exportId in progress ($entityType $entityId)');
 
       final artifact = await generate();
+      _log.d('export $exportId generated');
 
       await _repository.markExportCompleted(
         exportId: exportId,
@@ -388,6 +429,7 @@ class ExportCubit extends Cubit<ExportState> {
         }
         emit(state.copyWith(status: ExportStatus.sharing, clearError: true));
         await shareService.shareExport(artifact);
+        _log.d('export $exportId shared');
       }
 
       final export = await _repository.getExportById(exportId);
@@ -399,7 +441,9 @@ class ExportCubit extends Cubit<ExportState> {
           clearError: true,
         ),
       );
-    } catch (error) {
+      _log.i('export $exportId completed');
+    } catch (error, stackTrace) {
+      _log.e('_generateExport failed', error, stackTrace);
       if (exportId != null) {
         await _repository.markExportFailed(
           exportId: exportId,

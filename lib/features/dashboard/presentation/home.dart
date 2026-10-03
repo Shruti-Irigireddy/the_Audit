@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/features/pre_field/presentation/pre-field.dart';
 import 'package:the_audit/features/pre_field/presentation/session_loop.dart';
 import 'package:the_audit/features/profile/presentation/profile_page.dart';
+
+const _log = AppLogger('Home');
 
 class HomePage extends StatefulWidget {
   final AppDatabase database;
@@ -22,18 +25,28 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _log.t('initState');
     _sessions = widget.database.recordDao.getRecentSessions();
   }
 
+  @override
+  void dispose() {
+    _log.t('dispose');
+    super.dispose();
+  }
+
   void _reload() {
+    _log.d('reloading sessions');
     setState(() {
       _sessions = widget.database.recordDao.getRecentSessions();
     });
   }
 
   Future<void> _createSession() async {
+    _log.i('new session tapped');
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
+        settings: const RouteSettings(name: 'CreateSession'),
         builder: (_) => CreateSessionPage(
           database: widget.database,
           authCubit: widget.authCubit,
@@ -44,8 +57,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _openSession(FieldSession session) async {
+    _log.i(
+      'open session ${session.sessionId} (status: ${session.sessionStatus})',
+    );
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
+        settings: const RouteSettings(name: 'SessionLoop'),
         builder: (_) => SessionLoopPage(
           database: widget.database,
           authCubit: widget.authCubit,
@@ -66,8 +83,10 @@ class _HomePageState extends State<HomePage> {
       ),
       appBar: NavBar(
         onProfileTap: () {
+          _log.d('profile tapped');
           Navigator.of(context).push(
             MaterialPageRoute<void>(
+              settings: const RouteSettings(name: 'Profile'),
               builder: (_) => ProfilePage(
                 database: widget.database,
                 authCubit: widget.authCubit,

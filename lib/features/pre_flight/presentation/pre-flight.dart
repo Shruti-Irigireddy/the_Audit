@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:the_audit/features/pre_flight/data/repositories/pre_flight_repository_impl.dart';
 import 'package:the_audit/features/pre_flight/presentation/cubit/pre_flight_cubit.dart';
 import 'package:the_audit/features/pre_flight/presentation/cubit/pre_flight_state.dart';
+
+const _log = AppLogger('PreFlight');
 
 class PreFlightChecklistPage extends StatefulWidget {
   final AppDatabase database;
@@ -34,6 +37,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
   @override
   void initState() {
     super.initState();
+    _log.t('initState flight ${widget.flightId}');
     _cubit = PreFlightCubit(
       PreFlightRepositoryImpl(widget.database.preFlightDao),
     )..loadSetup(widget.flightId);
@@ -41,6 +45,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
 
   @override
   void dispose() {
+    _log.t('dispose');
     _cubit.close();
     _decisionReasonController.dispose();
     super.dispose();
@@ -71,7 +76,10 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
                   Row(
                     children: [
                       IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
+                        onPressed: () {
+                          _log.d('back tapped');
+                          Navigator.of(context).pop();
+                        },
                         icon: const Icon(Icons.arrow_back),
                         tooltip: 'Back',
                       ),
@@ -107,9 +115,11 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
                     reasonController: _decisionReasonController,
                     onDecisionChanged: (value) {
                       if (value == null) return;
+                      _log.d('decision selected: $value');
                       setState(() => _finalDecision = value);
                     },
                     onDecisionByChanged: (value) {
+                      _log.d('decision by selected: $value');
                       setState(() => _decisionByUserId = value);
                     },
                     onSubmit: _submitDecision,
@@ -131,10 +141,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
                   for (final issue in state.completionIssues)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        issue,
-                        style: AppTextStyles.error,
-                      ),
+                      child: Text(issue, style: AppTextStyles.error),
                     ),
                 ],
               ),
@@ -155,6 +162,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
   }
 
   Future<void> _saveResponse(String itemId, String response) async {
+    _log.d('response $itemId: $response');
     final performedBy = await _performedBy();
     return _cubit.saveChecklistResponse(
       flightId: widget.flightId,
@@ -165,44 +173,62 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
   }
 
   Future<void> _validate() {
+    _log.i('validate ready to arm tapped');
     return _cubit.validateReadyToArm(widget.flightId);
   }
 
-  Future<void> _markTakeoff({required bool canStartFlight}) async {
-    if (!canStartFlight) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Validate ready to arm and save a GO decision first.'),
-        ),
-      );
-      return;
-    }
+  Future<void> _markTakeoff({required bool canStartFlight}) =>
+      _log.trace('markTakeoff', () async {
+        _log.i('start flight tapped (canStart: $canStartFlight)');
+        if (!canStartFlight) {
+          _log.w('start flight blocked: not validated or not GO');
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Validate ready to arm and save a GO decision first.',
+              ),
+            ),
+          );
+          return;
+        }
 
-    final performedBy = await _performedBy();
-    final takeoffAt = await _pickDateTime(title: 'Takeoff time');
-    if (takeoffAt == null) return;
+        final performedBy = await _performedBy();
+        final takeoffAt = await _pickDateTime(title: 'Takeoff time');
+        if (takeoffAt == null) {
+          _log.d('takeoff time cancelled');
+          return;
+        }
 
-    return _cubit.markFlightInProgress(
-      flightId: widget.flightId,
-      takeoffAt: takeoffAt,
-      performedBy: performedBy,
-    );
-  }
+        return _cubit.markFlightInProgress(
+          flightId: widget.flightId,
+          takeoffAt: takeoffAt,
+          performedBy: performedBy,
+        );
+      });
 
-  Future<void> _recordLanding() async {
+  Future<void> _recordLanding() => _log.trace('recordLanding', () async {
+    _log.i('record landing tapped');
     final performedBy = await _performedBy();
     final landingAt = await _pickDateTime(title: 'Landing time');
-    if (landingAt == null) return;
+    if (landingAt == null) {
+      _log.d('landing time cancelled');
+      return;
+    }
 
     return _cubit.recordLanding(
       flightId: widget.flightId,
       landingAt: landingAt,
       performedBy: performedBy,
     );
-  }
+  });
 
-  Future<void> _submitDecision() async {
+  Future<void> _submitDecision() => _log.trace('submitDecision', () async {
+    _log.i(
+      'save decision tapped: $_finalDecision '
+      '(hasReason: ${_decisionReasonController.text.trim().isNotEmpty})',
+    );
     if (_cubit.state.readyToArmValidation == null) {
+      _log.w('decision blocked: not validated');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Run ready-to-arm validation before final decision.'),
@@ -218,7 +244,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
       decisionReason: _nullable(_decisionReasonController.text),
       decisionBy: decisionBy,
     );
-  }
+  });
 
   Future<DateTime?> _pickDateTime({required String title}) async {
     final date = await showDatePicker(
@@ -263,6 +289,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
       if (user != null) return user.id;
     }
 
+    _log.w('performedBy: no local user, using raw id');
     return uid ?? email ?? 'unknown';
   }
 }
@@ -294,10 +321,7 @@ class _DecisionCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Final decision',
-              style: AppTextStyles.cardTitle,
-            ),
+            const Text('Final decision', style: AppTextStyles.cardTitle),
             if (state.selectedSortie?.decisionAt != null) ...[
               const SizedBox(height: 6),
               Text(
@@ -376,10 +400,7 @@ class _ChecklistItemTile extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              section,
-              style: AppTextStyles.label,
-            ),
+            Text(section, style: AppTextStyles.label),
             const SizedBox(height: 4),
             Text(label, style: AppTextStyles.bodyStrong),
             const SizedBox(height: 10),

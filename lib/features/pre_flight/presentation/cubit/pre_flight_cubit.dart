@@ -1,15 +1,19 @@
 import 'package:bloc/bloc.dart';
 
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/pre_flight/domain/dtos/pre_flight_dtos.dart';
 import 'package:the_audit/features/pre_flight/domain/repositories/pre_flight_repository.dart';
 import 'pre_flight_state.dart';
 
 class PreFlightCubit extends Cubit<PreFlightState> {
+  static const _log = AppLogger('PreFlightCubit');
+
   final PreFlightRepository _repository;
 
   PreFlightCubit(this._repository) : super(PreFlightState.initial());
 
   Future<void> loadSortiesForSession(String sessionId) async {
+    _log.t('loadSortiesForSession($sessionId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.loading,
@@ -19,6 +23,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
 
     try {
       final sorties = await _repository.getSortiesForSession(sessionId);
+      _log.d('${sorties.length} sorties loaded for $sessionId');
       emit(
         state.copyWith(
           viewStatus: PreFlightViewStatus.loaded,
@@ -26,7 +31,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadSortiesForSession failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -40,6 +46,9 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     required String performedBy,
     List<String> selectedPayloadIds = const [],
   }) async {
+    _log.i(
+      'createSortie(id: $flightId, session: $sessionId, vehicle: $sessionVehicleId, ${selectedPayloadIds.length} payloads)',
+    );
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -57,13 +66,16 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         performedBy: performedBy,
         selectedPayloadIds: selectedPayloadIds,
       );
+      _log.i('sortie created: $id');
       await loadSetup(id);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('createSortie failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> loadSetup(String flightId) async {
+    _log.t('loadSetup($flightId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.loading,
@@ -81,6 +93,10 @@ class PreFlightCubit extends Cubit<PreFlightState> {
       final checklistResponses = await _repository
           .getChecklistResponsesForFlight(flightId);
       final overrides = await _repository.getOverridesForFlight(flightId);
+      _log.d(
+        'setup $flightId: ${checklistItems.length} checklist items, '
+        '${checklistResponses.length} responses, ${overrides.length} overrides',
+      );
 
       emit(
         state.copyWith(
@@ -96,7 +112,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadSetup failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -107,6 +124,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     String? objective,
     required String performedBy,
   }) async {
+    _log.i('updateSortieBasicInfo($flightId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -122,7 +140,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('updateSortieBasicInfo failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -133,6 +152,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     required String role,
     required String performedBy,
   }) async {
+    _log.i('addUserToSortie($flightId, role: $role)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -148,7 +168,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('addUserToSortie failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -159,6 +180,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     required String role,
     required String performedBy,
   }) async {
+    _log.i('removeUserFromSortie($flightId, role: $role)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -174,7 +196,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('removeUserFromSortie failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -184,6 +207,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     required List<SortieUserDraft> users,
     required String performedBy,
   }) async {
+    _log.i('replaceSortieUsers($flightId, ${users.length} users)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -198,12 +222,14 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('replaceSortieUsers failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> loadSelectablePayloadsForSortie(String flightId) async {
+    _log.t('loadSelectablePayloadsForSortie($flightId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.loading,
@@ -222,7 +248,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadSelectablePayloadsForSortie failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -232,6 +259,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     required String payloadId,
     required String createdBy,
   }) async {
+    _log.i('addPayloadToSortie($flightId, payload: $payloadId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -246,7 +274,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         createdBy: createdBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('addPayloadToSortie failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -256,6 +285,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     required String payloadId,
     required String performedBy,
   }) async {
+    _log.i('removePayloadFromSortie($flightId, payload: $payloadId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -270,7 +300,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('removePayloadFromSortie failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -280,6 +311,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     required List<String> payloadIds,
     required String performedBy,
   }) async {
+    _log.i('replaceSortiePayloads($flightId, ${payloadIds.length} payloads)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -294,12 +326,14 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('replaceSortiePayloads failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> loadSelectableBatteriesForSortie(String flightId) async {
+    _log.t('loadSelectableBatteriesForSortie($flightId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.loading,
@@ -318,7 +352,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadSelectableBatteriesForSortie failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -330,6 +365,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     int? percentStart,
     required String createdBy,
   }) async {
+    _log.i('addBatteryToSortie($flightId, battery: $batteryId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -346,7 +382,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         createdBy: createdBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('addBatteryToSortie failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -356,6 +393,9 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     required List<SortieBatteryDraft> batteries,
     required String performedBy,
   }) async {
+    _log.i(
+      'replaceAllSortieBatteries($flightId, ${batteries.length} batteries)',
+    );
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -370,7 +410,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('replaceAllSortieBatteries failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -383,6 +424,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     int? percentStart,
     required String performedBy,
   }) async {
+    _log.i('replaceSortieBattery($flightId, $oldBatteryId -> $newBatteryId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -400,7 +442,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('replaceSortieBattery failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -412,6 +455,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     int? percentStart,
     required String performedBy,
   }) async {
+    _log.i('updateSortieBatteryStartState($flightId, battery: $batteryId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -428,7 +472,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('updateSortieBatteryStartState failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -438,6 +483,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     required String batteryId,
     required String performedBy,
   }) async {
+    _log.i('removeBatteryFromSortie($flightId, battery: $batteryId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -452,7 +498,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('removeBatteryFromSortie failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -468,6 +515,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
   }
 
   Future<void> loadBlockingChecklistItemsForSortie(String flightId) async {
+    _log.t('loadBlockingChecklistItemsForSortie($flightId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.loading,
@@ -485,7 +533,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadBlockingChecklistItemsForSortie failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -499,6 +548,9 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     String? notes,
     required String createdBy,
   }) async {
+    _log.i(
+      'saveChecklistResponse($flightId, item: $itemId, response: $response)',
+    );
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -517,7 +569,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         createdBy: createdBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('saveChecklistResponse failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -527,6 +580,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     required List<ChecklistResponseDraft> responses,
     required String createdBy,
   }) async {
+    _log.i('saveChecklistResponses($flightId, ${responses.length} responses)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -541,12 +595,14 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         createdBy: createdBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('saveChecklistResponses failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> validateReadyToArm(String flightId) async {
+    _log.t('validateReadyToArm($flightId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.validating,
@@ -561,6 +617,12 @@ class PreFlightCubit extends Cubit<PreFlightState> {
       final completionIssues = await _repository.validatePreflightCompletion(
         flightId,
       );
+      _log.d(
+        'readyToArm($flightId): canProceed=${readyToArmValidation.canProceed}, '
+        'missing=${readyToArmValidation.missingItems.length}, '
+        'failed=${readyToArmValidation.failedItems.length}, '
+        'completionIssues=${completionIssues.length}',
+      );
       emit(
         state.copyWith(
           viewStatus: PreFlightViewStatus.loaded,
@@ -569,7 +631,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('validateReadyToArm failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -580,6 +643,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     String? decisionReason,
     required String decisionBy,
   }) async {
+    _log.i('submitGoNoGoDecision($flightId, decision: $finalDecision)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -594,8 +658,10 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         decisionReason: decisionReason,
         decisionBy: decisionBy,
       );
+      _log.i('decision recorded: $flightId -> $finalDecision');
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('submitGoNoGoDecision failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -606,6 +672,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     required String overriddenReason,
     required String overriddenBy,
   }) async {
+    _log.i('createChecklistOverride($flightId, item: $itemId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -620,8 +687,10 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         overriddenReason: overriddenReason,
         overriddenBy: overriddenBy,
       );
+      _log.i('manual override recorded: $flightId, item $itemId');
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('createChecklistOverride failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -632,6 +701,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     DateTime? takeoffAt,
     required String performedBy,
   }) async {
+    _log.i('markFlightInProgress($flightId, status: $flightStatus)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -647,7 +717,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('markFlightInProgress failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -658,6 +729,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     DateTime? landingAt,
     required String performedBy,
   }) async {
+    _log.i('recordLanding($flightId, status: $flightStatus)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -673,7 +745,8 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('recordLanding failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -683,6 +756,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     required String reason,
     required String performedBy,
   }) async {
+    _log.i('abortSortie($flightId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -696,8 +770,10 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         reason: reason,
         performedBy: performedBy,
       );
+      _log.i('sortie aborted: $flightId');
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('abortSortie failed', error, stackTrace);
       _emitFailure(error);
     }
   }

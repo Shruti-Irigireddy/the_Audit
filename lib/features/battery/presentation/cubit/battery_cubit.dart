@@ -1,21 +1,26 @@
 import 'package:bloc/bloc.dart';
 
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/battery/domain/entities/battery_entity.dart';
 import 'package:the_audit/features/battery/domain/repositories/battery_repository.dart';
 import 'battery_state.dart';
 
 class BatteryCubit extends Cubit<BatteryState> {
+  static const _log = AppLogger('BatteryCubit');
+
   final BatteryRepository _repository;
 
   BatteryCubit(this._repository) : super(BatteryState.initial());
 
   Future<void> loadAllBatteries() async {
+    _log.t('loadAllBatteries()');
     emit(
       state.copyWith(viewStatus: BatteryViewStatus.loading, errorMessage: null),
     );
 
     try {
       final batteries = await _repository.getAllBatteries();
+      _log.d('${batteries.length} batteries loaded');
       emit(
         state.copyWith(
           viewStatus: BatteryViewStatus.loaded,
@@ -23,18 +28,21 @@ class BatteryCubit extends Cubit<BatteryState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadAllBatteries failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> loadActiveBatteries() async {
+    _log.t('loadActiveBatteries()');
     emit(
       state.copyWith(viewStatus: BatteryViewStatus.loading, errorMessage: null),
     );
 
     try {
       final batteries = await _repository.getActiveBatteries();
+      _log.d('${batteries.length} active batteries loaded');
       emit(
         state.copyWith(
           viewStatus: BatteryViewStatus.loaded,
@@ -43,12 +51,14 @@ class BatteryCubit extends Cubit<BatteryState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadActiveBatteries failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> selectBattery(String batteryId) async {
+    _log.t('selectBattery($batteryId)');
     emit(
       state.copyWith(viewStatus: BatteryViewStatus.loading, errorMessage: null),
     );
@@ -62,7 +72,8 @@ class BatteryCubit extends Cubit<BatteryState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('selectBattery failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -76,6 +87,7 @@ class BatteryCubit extends Cubit<BatteryState> {
     required BatteryStatus status,
     required String performedBy,
   }) async {
+    _log.i('createBattery(id: $batteryId, status: ${status.name})');
     emit(
       state.copyWith(viewStatus: BatteryViewStatus.saving, errorMessage: null),
     );
@@ -90,6 +102,7 @@ class BatteryCubit extends Cubit<BatteryState> {
         status: status.name,
         performedBy: performedBy,
       );
+      _log.d('battery created: $id');
       final battery = await _repository.getBatteryById(id);
       emit(
         state.copyWith(
@@ -100,7 +113,8 @@ class BatteryCubit extends Cubit<BatteryState> {
         ),
       );
       await loadAllBatteries();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('createBattery failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -114,6 +128,7 @@ class BatteryCubit extends Cubit<BatteryState> {
     BatteryStatus? status,
     required String performedBy,
   }) async {
+    _log.i('updateBattery($batteryId, status: ${status?.name})');
     emit(
       state.copyWith(viewStatus: BatteryViewStatus.saving, errorMessage: null),
     );
@@ -138,7 +153,8 @@ class BatteryCubit extends Cubit<BatteryState> {
         ),
       );
       await loadAllBatteries();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('updateBattery failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -147,6 +163,7 @@ class BatteryCubit extends Cubit<BatteryState> {
     required String batteryId,
     required String performedBy,
   }) async {
+    _log.i('retireBattery($batteryId)');
     emit(
       state.copyWith(viewStatus: BatteryViewStatus.saving, errorMessage: null),
     );
@@ -164,7 +181,8 @@ class BatteryCubit extends Cubit<BatteryState> {
         ),
       );
       await loadAllBatteries();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('retireBattery failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -173,6 +191,7 @@ class BatteryCubit extends Cubit<BatteryState> {
     required String batteryId,
     required String performedBy,
   }) async {
+    _log.i('incrementCycleCount($batteryId)');
     emit(
       state.copyWith(viewStatus: BatteryViewStatus.saving, errorMessage: null),
     );
@@ -192,7 +211,8 @@ class BatteryCubit extends Cubit<BatteryState> {
         ),
       );
       await loadAllBatteries();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('incrementCycleCount failed', error, stackTrace);
       _emitFailure(error);
     }
   }

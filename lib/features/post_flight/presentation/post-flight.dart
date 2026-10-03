@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
@@ -10,6 +11,8 @@ import 'package:the_audit/features/post_flight/presentation/cubit/post_flight_cu
 import 'package:the_audit/features/post_flight/presentation/cubit/post_flight_state.dart';
 import 'package:the_audit/features/pre_flight/data/mappers/pre_flight_mapper.dart';
 import 'package:the_audit/features/pre_flight/domain/entities/sortie_user_entity.dart';
+
+const _log = AppLogger('PostFlight');
 
 class PostFlightNotesPage extends StatefulWidget {
   final AppDatabase database;
@@ -48,6 +51,7 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
   @override
   void initState() {
     super.initState();
+    _log.t('initState flight ${widget.flightId}');
     _cubit = PostFlightCubit(
       PostFlightRepositoryImpl(widget.database.postFlightDao),
     )..loadSetup(widget.flightId);
@@ -56,6 +60,7 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
 
   @override
   void dispose() {
+    _log.t('dispose');
     _cubit.close();
     _objectiveNotesController.dispose();
     _structuralDamageController.dispose();
@@ -89,7 +94,10 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
                   Row(
                     children: [
                       IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
+                        onPressed: () {
+                          _log.d('back tapped');
+                          Navigator.of(context).pop();
+                        },
                         icon: const Icon(Icons.arrow_back),
                         tooltip: 'Back',
                       ),
@@ -169,6 +177,7 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
                   SwitchListTile(
                     value: _followUpRequired,
                     onChanged: (value) {
+                      _log.d('follow-up required: $value');
                       setState(() => _followUpRequired = value);
                     },
                     title: const Text('Follow-up required'),
@@ -243,7 +252,12 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
     );
   }
 
-  Future<void> _save() async {
+  Future<void> _save() => _log.trace('save', () async {
+    _log.i(
+      'save notes tapped (objective: $_objectiveResult, '
+      'rating: ${_formatRating(_missionRating)}, '
+      'followUp: $_followUpRequired)',
+    );
     final performedBy = await _performedBy();
     return _cubit.savePostFlightNote(
       flightId: widget.flightId,
@@ -263,12 +277,13 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
       notes: _nullable(_notesController.text),
       createdBy: performedBy,
     );
-  }
+  });
 
-  Future<void> _closeSortie() async {
+  Future<void> _closeSortie() => _log.trace('closeSortie', () async {
+    _log.i('close sortie tapped ${widget.flightId}');
     final performedBy = await _performedBy();
     return _cubit.closeSortie(flightId: widget.flightId, closedBy: performedBy);
-  }
+  });
 
   String? _nullable(String value) {
     final clean = value.trim();
@@ -306,6 +321,7 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
     final users = await widget.database.preFlightDao.getSortieUsers(
       widget.flightId,
     );
+    _log.d('loaded ${users.length} sortie users');
     if (!mounted) return;
     setState(() {
       _sortieUsers = users.map((item) => item.toEntity()).toList();
@@ -330,6 +346,7 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
       if (user != null) return user.id;
     }
 
+    _log.w('performedBy: no local user, using raw id');
     return uid ?? email ?? 'unknown';
   }
 

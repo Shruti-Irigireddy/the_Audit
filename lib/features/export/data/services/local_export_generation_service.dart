@@ -3,11 +3,14 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/export/domain/services/export_generation_service.dart';
 import 'package:the_audit/features/records/domain/entities/record_entity.dart';
 import 'package:the_audit/features/records/domain/repositories/records_repository.dart';
 
 class LocalExportGenerationService implements ExportGenerationService {
+  static const _log = AppLogger('LocalExportGenerationService');
+
   final RecordRepository _recordRepository;
 
   const LocalExportGenerationService(this._recordRepository);
@@ -16,51 +19,67 @@ class LocalExportGenerationService implements ExportGenerationService {
   Future<ExportArtifact> generateSessionExport({
     required String sessionId,
     required String exportFormat,
-  }) async {
-    final format = _normalizeFormat(exportFormat);
-    final record = await _recordRepository.getSessionRecordView(sessionId);
-    final content = switch (format) {
-      'CSV' => utf8.encode(_buildSessionCsv(record)),
-      'PDF' => _buildSimplePdf(_buildSessionReportText(record)),
-      _ => throw Exception('Unsupported export format: $exportFormat'),
-    };
+  }) {
+    return _log.trace('generateSessionExport', () async {
+      final format = _normalizeFormat(exportFormat);
+      final record = await _recordRepository.getSessionRecordView(sessionId);
+      _log.d(
+        'session $sessionId: ${record.sorties.length} sorties, '
+        '${record.auditTrail.length} audit events',
+      );
+      final content = switch (format) {
+        'CSV' => utf8.encode(_buildSessionCsv(record)),
+        'PDF' => _buildSimplePdf(_buildSessionReportText(record)),
+        _ => throw Exception('Unsupported export format: $exportFormat'),
+      };
 
-    final filePath = await _writeExportFile(
-      fileName: 'session_$sessionId.${format.toLowerCase()}',
-      content: content,
-    );
+      final filePath = await _writeExportFile(
+        fileName: 'session_$sessionId.${format.toLowerCase()}',
+        content: content,
+      );
+      _log.i(
+        'session export $format written: $filePath (${content.length} bytes)',
+      );
 
-    return ExportArtifact(
-      entityType: 'FIELD_SESSION',
-      entityId: sessionId,
-      exportFormat: format,
-      filePath: filePath,
-      generatedAt: DateTime.now(),
-    );
+      return ExportArtifact(
+        entityType: 'FIELD_SESSION',
+        entityId: sessionId,
+        exportFormat: format,
+        filePath: filePath,
+        generatedAt: DateTime.now(),
+      );
+    });
   }
 
   @override
   Future<ExportArtifact> generateFlightExport({
     required String flightId,
     required String exportFormat,
-  }) async {
-    final format = _normalizeFormat(exportFormat);
-    final sortie = await _recordRepository.getSortieById(flightId);
+  }) {
+    return _log.trace('generateFlightExport', () async {
+      final format = _normalizeFormat(exportFormat);
+      final sortie = await _recordRepository.getSortieById(flightId);
 
-    if (sortie == null) {
-      throw Exception('Flight not found: $flightId');
-    }
+      if (sortie == null) {
+        throw Exception('Flight not found: $flightId');
+      }
 
-    final responses =
-        await _recordRepository.getChecklistResponsesForFlight(flightId);
-    final overrides = await _recordRepository.getOverridesForFlight(flightId);
-    final note = await _recordRepository.getPostFlightNoteForFlight(flightId);
-    final batteries = await _recordRepository.getSortieBatteries(flightId);
-    final payloads = await _recordRepository.getSortiePayloads(flightId);
-    final users = await _recordRepository.getSortieUsers(flightId);
+      final responses = await _recordRepository.getChecklistResponsesForFlight(
+        flightId,
+      );
+      final overrides = await _recordRepository.getOverridesForFlight(flightId);
+      final note = await _recordRepository.getPostFlightNoteForFlight(flightId);
+      final batteries = await _recordRepository.getSortieBatteries(flightId);
+      final payloads = await _recordRepository.getSortiePayloads(flightId);
+      final users = await _recordRepository.getSortieUsers(flightId);
+      _log.d(
+        'flight $flightId: ${responses.length} responses, '
+        '${overrides.length} overrides, ${batteries.length} batteries, '
+        '${payloads.length} payloads, ${users.length} users',
+      );
 
-    final content = switch (format) {
-      'CSV' => utf8.encode(
+      final content = switch (format) {
+        'CSV' => utf8.encode(
           _buildFlightCsv(
             sortie: sortie,
             users: users,
@@ -71,7 +90,7 @@ class LocalExportGenerationService implements ExportGenerationService {
             note: note,
           ),
         ),
-      'PDF' => _buildSimplePdf(
+        'PDF' => _buildSimplePdf(
           _buildFlightReportText(
             sortie: sortie,
             users: users,
@@ -82,30 +101,49 @@ class LocalExportGenerationService implements ExportGenerationService {
             note: note,
           ),
         ),
-      _ => throw Exception('Unsupported export format: $exportFormat'),
-    };
+        _ => throw Exception('Unsupported export format: $exportFormat'),
+      };
 
-    final filePath = await _writeExportFile(
-      fileName: 'flight_$flightId.${format.toLowerCase()}',
-      content: content,
-    );
+      final filePath = await _writeExportFile(
+        fileName: 'flight_$flightId.${format.toLowerCase()}',
+        content: content,
+      );
+      _log.i(
+        'flight export $format written: $filePath (${content.length} bytes)',
+      );
 
-    return ExportArtifact(
-      entityType: 'SORTIE',
-      entityId: flightId,
-      exportFormat: format,
-      filePath: filePath,
-      generatedAt: DateTime.now(),
-    );
+      return ExportArtifact(
+        entityType: 'SORTIE',
+        entityId: flightId,
+        exportFormat: format,
+        filePath: filePath,
+        generatedAt: DateTime.now(),
+      );
+    });
   }
 
   String _buildSessionCsv(SessionRecordViewEntity record) {
     final rows = <List<Object?>>[
       ['section', 'id', 'field', 'value'],
       ['session', record.session.sessionId, 'date', record.session.date],
-      ['session', record.session.sessionId, 'location', record.session.locationName],
-      ['session', record.session.sessionId, 'missionType', record.session.missionType],
-      ['session', record.session.sessionId, 'status', record.session.sessionStatus],
+      [
+        'session',
+        record.session.sessionId,
+        'location',
+        record.session.locationName,
+      ],
+      [
+        'session',
+        record.session.sessionId,
+        'missionType',
+        record.session.missionType,
+      ],
+      [
+        'session',
+        record.session.sessionId,
+        'status',
+        record.session.sessionStatus,
+      ],
       for (final user in record.sessionUsers)
         ['sessionUser', user.id, 'role', user.role],
       for (final vehicle in record.sessionVehicles)

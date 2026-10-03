@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/theme.dart';
+
+const _log = AppLogger('NavBar');
 
 class NavBar extends StatelessWidget implements PreferredSizeWidget {
   final bool showBackButton;
@@ -24,7 +27,14 @@ class NavBar extends StatelessWidget implements PreferredSizeWidget {
       automaticallyImplyLeading: false,
       leading: showBackButton
           ? IconButton(
-              onPressed: onBack ?? () => Navigator.of(context).maybePop(),
+              onPressed: () {
+                _log.d('back tapped');
+                if (onBack != null) {
+                  onBack!();
+                } else {
+                  Navigator.of(context).maybePop();
+                }
+              },
               icon: const Icon(Icons.arrow_back),
               tooltip: 'Back',
             )
@@ -46,15 +56,17 @@ class NavBar extends StatelessWidget implements PreferredSizeWidget {
                     size: logoHeight,
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    title,
-                    style: AppTextStyles.navTitle,
-                  ),
+                  Text(title, style: AppTextStyles.navTitle),
                 ],
               ),
               if (showProfileButton)
                 GestureDetector(
-                  onTap: onProfileTap,
+                  onTap: onProfileTap == null
+                      ? null
+                      : () {
+                          _log.d('profile tapped');
+                          onProfileTap!();
+                        },
                   child: CircleAvatar(
                     radius: avatarRadius,
                     backgroundColor: AppColors.snowWhite,

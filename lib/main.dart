@@ -1,6 +1,11 @@
+import 'dart:ui';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/features/auth/data/auth_storage.dart';
 import 'package:the_audit/features/auth/presentation/auth_gate.dart';
@@ -8,10 +13,33 @@ import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 
 import 'firebase_options.dart';
 
+const _log = AppLogger('App');
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
+
+  if (kDebugMode) {
+    Bloc.observer = AppBlocObserver();
+
+    // Uncaught Flutter framework errors (build/layout/paint).
+    final previousOnError = FlutterError.onError;
+    FlutterError.onError = (details) {
+      _log.e('Flutter error', details.exception, details.stack);
+      previousOnError?.call(details);
+    };
+
+    // Uncaught async / platform errors.
+    PlatformDispatcher.instance.onError = (error, stackTrace) {
+      _log.e('Uncaught error', error, stackTrace);
+      return false; // keep default handling
+    };
+  }
+
+  _log.i('Starting The Audit');
+  await _log.trace(
+    'Firebase.initializeApp',
+    () =>
+        Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform),
   );
   runApp(const TheAuditApp());
 }
@@ -48,12 +76,9 @@ class _TheAuditAppState extends State<TheAuditApp> {
     return MaterialApp(
       title: 'The Audit',
       debugShowCheckedModeBanner: false,
+      navigatorObservers: [if (kDebugMode) AppRouteLogger()],
       theme: AppTheme.lightTheme,
-      home: AuthGate(
-        database: _database,
-        authCubit: _authCubit,
-      ),       
+      home: AuthGate(database: _database, authCubit: _authCubit),
     );
   }
 }
-

@@ -1,4 +1,5 @@
 import 'package:the_audit/core/database/daos/pre_field/pre_field_dao.dart';
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/database/dtos/pre_field_dtos.dart'
     as db_pre_field;
 
@@ -19,6 +20,8 @@ import 'package:the_audit/features/pre_field/domain/entities/session_vehicle_ent
 import 'package:the_audit/features/pre_field/domain/repositories/pre_field_repository.dart';
 
 class PreFieldRepositoryImpl implements PreFieldRepository {
+  static const _log = AppLogger('PreFieldRepositoryImpl');
+
   final PreFieldDao _preFieldDao;
 
   PreFieldRepositoryImpl(this._preFieldDao);
@@ -34,7 +37,8 @@ class PreFieldRepositoryImpl implements PreFieldRepository {
     required String sessionStatus,
     required String createdBy,
   }) {
-    return  _preFieldDao.createFieldSession(
+    _log.t('createFieldSession(sessionId: $sessionId)');
+    return _preFieldDao.createFieldSession(
       sessionId: sessionId,
       date: date,
       locationName: locationName,
@@ -46,8 +50,8 @@ class PreFieldRepositoryImpl implements PreFieldRepository {
     );
   }
 
-@override
-Future<void> updateFieldSessionBasicInfo({
+  @override
+  Future<void> updateFieldSessionBasicInfo({
     required String sessionId,
     DateTime? date,
     String? locationName,
@@ -56,6 +60,7 @@ Future<void> updateFieldSessionBasicInfo({
     String? missionType,
     required String performedBy,
   }) {
+    _log.t('updateFieldSessionBasicInfo(sessionId: $sessionId)');
     return _preFieldDao.updateFieldSessionBasicInfo(
       sessionId: sessionId,
       date: date,
@@ -69,13 +74,16 @@ Future<void> updateFieldSessionBasicInfo({
 
   @override
   Future<FieldSessionEntity?> getFieldSessionById(String sessionId) async {
+    _log.t('getFieldSessionById(sessionId: $sessionId)');
     final session = await _preFieldDao.getFieldSessionById(sessionId);
     return session?.toEntity();
   }
 
   @override
   Future<List<FieldSessionEntity>> getInProgressFieldSessions() async {
+    _log.t('getInProgressFieldSessions()');
     final sessions = await _preFieldDao.getInProgressFieldSessions();
+    _log.d('getInProgressFieldSessions: ${sessions.length} items');
     return sessions.map((session) => session.toEntity()).toList();
   }
 
@@ -84,6 +92,7 @@ Future<void> updateFieldSessionBasicInfo({
     required String sessionId,
     required String closedBy,
   }) {
+    _log.t('closeFieldSession(sessionId: $sessionId)');
     return _preFieldDao.closeFieldSession(
       sessionId: sessionId,
       closedBy: closedBy,
@@ -97,6 +106,7 @@ Future<void> updateFieldSessionBasicInfo({
     required String role,
     required String performedBy,
   }) {
+    _log.t('addUserToSession(sessionId: $sessionId, userId: $userId)');
     return _preFieldDao.addUserToSession(
       sessionId: sessionId,
       userId: userId,
@@ -110,6 +120,7 @@ Future<void> updateFieldSessionBasicInfo({
     required String sessionUserId,
     required String performedBy,
   }) {
+    _log.t('removeUserFromSession(sessionUserId: $sessionUserId)');
     return _preFieldDao.removeUserFromSession(
       sessionUserId: sessionUserId,
       performedBy: performedBy,
@@ -122,20 +133,29 @@ Future<void> updateFieldSessionBasicInfo({
     required List<domain_pre_field.SessionUserDraft> users,
     required String performedBy,
   }) {
+    _log.t('replaceSessionUsers(sessionId: $sessionId)');
     return _preFieldDao.replaceSessionUsers(
       sessionId: sessionId,
-      users: users.map((user) => db_pre_field.SessionUserDraft(
-        id: user.id,
-        userId: user.userId,
-        role: user.role,
-      )).toList(),
+      users: users
+          .map(
+            (user) => db_pre_field.SessionUserDraft(
+              id: user.id,
+              userId: user.userId,
+              role: user.role,
+            ),
+          )
+          .toList(),
       performedBy: performedBy,
     );
   }
 
   @override
-  Future<List<SessionUserWithUserEntity>> getSessionUsers(String sessionId) async {
+  Future<List<SessionUserWithUserEntity>> getSessionUsers(
+    String sessionId,
+  ) async {
+    _log.t('getSessionUsers(sessionId: $sessionId)');
     final sessionUsers = await _preFieldDao.getSessionUsers(sessionId);
+    _log.d('getSessionUsers: ${sessionUsers.length} items');
     return sessionUsers.map((sessionUser) => sessionUser.toEntity()).toList();
   }
 
@@ -144,6 +164,7 @@ Future<void> updateFieldSessionBasicInfo({
     required String sessionId,
     required String role,
   }) {
+    _log.t('countSessionUsersByRole(sessionId: $sessionId)');
     return _preFieldDao.countSessionUsersByRole(
       sessionId: sessionId,
       role: role,
@@ -157,6 +178,7 @@ Future<void> updateFieldSessionBasicInfo({
     String? objective,
     required String performedBy,
   }) {
+    _log.t('addVehicleToSession(sessionId: $sessionId, vehicleId: $vehicleId)');
     return _preFieldDao.addVehicleToSession(
       sessionId: sessionId,
       vehicleId: vehicleId,
@@ -170,6 +192,7 @@ Future<void> updateFieldSessionBasicInfo({
     required String sessionVehicleId,
     required String performedBy,
   }) {
+    _log.t('removeVehicleFromSession(sessionVehicleId: $sessionVehicleId)');
     return _preFieldDao.removeVehicleFromSession(
       sessionVehicleId: sessionVehicleId,
       performedBy: performedBy,
@@ -182,6 +205,9 @@ Future<void> updateFieldSessionBasicInfo({
     String? objective,
     required String performedBy,
   }) {
+    _log.t(
+      'updateSessionVehicleObjective(sessionVehicleId: $sessionVehicleId)',
+    );
     return _preFieldDao.updateSessionVehicleObjective(
       sessionVehicleId: sessionVehicleId,
       objective: objective,
@@ -195,30 +221,45 @@ Future<void> updateFieldSessionBasicInfo({
     required List<domain_pre_field.SessionVehicleDraft> vehicles,
     required String performedBy,
   }) {
+    _log.t('replaceSessionVehicles(sessionId: $sessionId)');
     return _preFieldDao.replaceSessionVehicles(
       sessionId: sessionId,
-      vehicles: vehicles.map((vehicle) => db_pre_field.SessionVehicleDraft(
-        id: vehicle.id,
-        vehicleId: vehicle.vehicleId,
-        objective: vehicle.objective,
-      )).toList(),
+      vehicles: vehicles
+          .map(
+            (vehicle) => db_pre_field.SessionVehicleDraft(
+              id: vehicle.id,
+              vehicleId: vehicle.vehicleId,
+              objective: vehicle.objective,
+            ),
+          )
+          .toList(),
       performedBy: performedBy,
     );
   }
 
   @override
-  Future<List<SessionVehicleWithVehicleEntity>> getSessionVehicles(String sessionId) async {
+  Future<List<SessionVehicleWithVehicleEntity>> getSessionVehicles(
+    String sessionId,
+  ) async {
+    _log.t('getSessionVehicles(sessionId: $sessionId)');
     final sessionVehicles = await _preFieldDao.getSessionVehicles(sessionId);
-    return sessionVehicles.map((sessionVehicle) => sessionVehicle.toEntity()).toList();
+    _log.d('getSessionVehicles: ${sessionVehicles.length} items');
+    return sessionVehicles
+        .map((sessionVehicle) => sessionVehicle.toEntity())
+        .toList();
   }
 
   @override
   Future<int> countSessionVehicles(String sessionId) {
+    _log.t('countSessionVehicles(sessionId: $sessionId)');
     return _preFieldDao.countSessionVehicles(sessionId);
   }
 
   @override
   Future<int> countSortiesForSessionVehicle(String sessionVehicleId) {
+    _log.t(
+      'countSortiesForSessionVehicle(sessionVehicleId: $sessionVehicleId)',
+    );
     return _preFieldDao.countSortiesForSessionVehicle(sessionVehicleId);
   }
 
@@ -228,6 +269,9 @@ Future<void> updateFieldSessionBasicInfo({
     required String payloadId,
     required String performedBy,
   }) {
+    _log.t(
+      'addPayloadToSessionVehicle(sessionVehicleId: $sessionVehicleId, payloadId: $payloadId)',
+    );
     return _preFieldDao.addPayloadToSessionVehicle(
       sessionVehicleId: sessionVehicleId,
       payloadId: payloadId,
@@ -241,6 +285,9 @@ Future<void> updateFieldSessionBasicInfo({
     required String payloadId,
     required String performedBy,
   }) {
+    _log.t(
+      'removePayloadFromSessionVehicle(sessionVehicleId: $sessionVehicleId, payloadId: $payloadId)',
+    );
     return _preFieldDao.removePayloadFromSessionVehicle(
       sessionVehicleId: sessionVehicleId,
       payloadId: payloadId,
@@ -254,6 +301,9 @@ Future<void> updateFieldSessionBasicInfo({
     required List<String> payloadIds,
     required String performedBy,
   }) {
+    _log.t(
+      'replacePayloadsForSessionVehicle(sessionVehicleId: $sessionVehicleId)',
+    );
     return _preFieldDao.replacePayloadsForSessionVehicle(
       sessionVehicleId: sessionVehicleId,
       payloadIds: payloadIds,
@@ -262,19 +312,32 @@ Future<void> updateFieldSessionBasicInfo({
   }
 
   @override
-  Future<List<PayloadEntity>> getPayloadsForSessionVehicle(String sessionVehicleId) async {
-    final payloads = await _preFieldDao.getPayloadsForSessionVehicle(sessionVehicleId);
+  Future<List<PayloadEntity>> getPayloadsForSessionVehicle(
+    String sessionVehicleId,
+  ) async {
+    _log.t('getPayloadsForSessionVehicle(sessionVehicleId: $sessionVehicleId)');
+    final payloads = await _preFieldDao.getPayloadsForSessionVehicle(
+      sessionVehicleId,
+    );
+    _log.d('getPayloadsForSessionVehicle: ${payloads.length} items');
     return payloads.map((payload) => payload.toEntity()).toList();
   }
 
   @override
   Future<int> countPayloadsForSessionVehicle(String sessionVehicleId) {
+    _log.t(
+      'countPayloadsForSessionVehicle(sessionVehicleId: $sessionVehicleId)',
+    );
     return _preFieldDao.countPayloadsForSessionVehicle(sessionVehicleId);
   }
 
   @override
-  Future<List<PayloadCompatibilityIssueEntity>> getPayloadCompatibilityIssues(String sessionId) async {
+  Future<List<PayloadCompatibilityIssueEntity>> getPayloadCompatibilityIssues(
+    String sessionId,
+  ) async {
+    _log.t('getPayloadCompatibilityIssues(sessionId: $sessionId)');
     final issues = await _preFieldDao.getPayloadCompatibilityIssues(sessionId);
+    _log.d('getPayloadCompatibilityIssues: ${issues.length} items');
     return issues.map((issue) => issue.toEntity()).toList();
   }
 
@@ -284,6 +347,7 @@ Future<void> updateFieldSessionBasicInfo({
     required String batteryId,
     required String performedBy,
   }) {
+    _log.t('addBatteryToSession(sessionId: $sessionId, batteryId: $batteryId)');
     return _preFieldDao.addBatteryToSession(
       sessionId: sessionId,
       batteryId: batteryId,
@@ -296,6 +360,7 @@ Future<void> updateFieldSessionBasicInfo({
     required String sessionBatteryId,
     required String performedBy,
   }) {
+    _log.t('removeBatteryFromSession(sessionBatteryId: $sessionBatteryId)');
     return _preFieldDao.removeBatteryFromSession(
       sessionBatteryId: sessionBatteryId,
       performedBy: performedBy,
@@ -308,26 +373,41 @@ Future<void> updateFieldSessionBasicInfo({
     required List<domain_pre_field.SessionBatteryDraft> batteries,
     required String performedBy,
   }) {
+    _log.t('replaceSessionBatteries(sessionId: $sessionId)');
     return _preFieldDao.replaceSessionBatteries(
       sessionId: sessionId,
-      batteries: batteries.map((battery) => db_pre_field.SessionBatteryDraft(
-        id: battery.id,
-        batteryId: battery.batteryId,
-      )).toList(),
+      batteries: batteries
+          .map(
+            (battery) => db_pre_field.SessionBatteryDraft(
+              id: battery.id,
+              batteryId: battery.batteryId,
+            ),
+          )
+          .toList(),
       performedBy: performedBy,
     );
   }
 
   @override
-  Future<List<SessionBatteryWithBatteryEntity>> getSessionBatteries(String sessionId) async {
+  Future<List<SessionBatteryWithBatteryEntity>> getSessionBatteries(
+    String sessionId,
+  ) async {
+    _log.t('getSessionBatteries(sessionId: $sessionId)');
     final sessionBatteries = await _preFieldDao.getSessionBatteries(sessionId);
-    return sessionBatteries.map((sessionBattery) => sessionBattery.toEntity()).toList();
+    _log.d('getSessionBatteries: ${sessionBatteries.length} items');
+    return sessionBatteries
+        .map((sessionBattery) => sessionBattery.toEntity())
+        .toList();
   }
 
   @override
   Future<List<PreFieldEquipmentEntity>> getActiveEquipmentList() async {
+    _log.t('getActiveEquipmentList()');
     final equipmentList = await _preFieldDao.getActiveEquipmentList();
-    return equipmentList.map((equipment) => equipment.toPreFieldEntity()).toList();
+    _log.d('getActiveEquipmentList: ${equipmentList.length} items');
+    return equipmentList
+        .map((equipment) => equipment.toPreFieldEntity())
+        .toList();
   }
 
   @override
@@ -335,6 +415,7 @@ Future<void> updateFieldSessionBasicInfo({
     required String sessionId,
     required String checkedBy,
   }) {
+    _log.t('createEquipmentChecksForSession(sessionId: $sessionId)');
     return _preFieldDao.createEquipmentChecksForSession(
       sessionId: sessionId,
       checkedBy: checkedBy,
@@ -348,6 +429,7 @@ Future<void> updateFieldSessionBasicInfo({
     String? notes,
     required String checkedBy,
   }) {
+    _log.t('updateEquipmentCheck(equipmentCheckId: $equipmentCheckId)');
     return _preFieldDao.updateEquipmentCheck(
       equipmentCheckId: equipmentCheckId,
       isPacked: isPacked,
@@ -357,8 +439,14 @@ Future<void> updateFieldSessionBasicInfo({
   }
 
   @override
-  Future<List<SessionEquipmentCheckWithItemEntity>> getSessionEquipmentChecks(String sessionId) async {
-    final equipmentChecks = await _preFieldDao.getSessionEquipmentChecks(sessionId);
+  Future<List<SessionEquipmentCheckWithItemEntity>> getSessionEquipmentChecks(
+    String sessionId,
+  ) async {
+    _log.t('getSessionEquipmentChecks(sessionId: $sessionId)');
+    final equipmentChecks = await _preFieldDao.getSessionEquipmentChecks(
+      sessionId,
+    );
+    _log.d('getSessionEquipmentChecks: ${equipmentChecks.length} items');
     return equipmentChecks.map((check) => check.toEntity()).toList();
   }
 
@@ -370,6 +458,9 @@ Future<void> updateFieldSessionBasicInfo({
     String? notes,
     required String checkedBy,
   }) {
+    _log.t(
+      'addCustomEquipmentCheckToSession(sessionId: $sessionId, equipmentId: $equipmentId)',
+    );
     return _preFieldDao.addCustomEquipmentCheckToSession(
       sessionId: sessionId,
       equipmentId: equipmentId,
@@ -381,6 +472,7 @@ Future<void> updateFieldSessionBasicInfo({
 
   @override
   Future<int> countUnpackedEquipmentChecks(String sessionId) {
+    _log.t('countUnpackedEquipmentChecks(sessionId: $sessionId)');
     return _preFieldDao.countUnpackedEquipmentChecks(sessionId);
   }
 
@@ -391,6 +483,7 @@ Future<void> updateFieldSessionBasicInfo({
     required String category,
     required String performedBy,
   }) {
+    _log.t('createEquipmentItem(id: $id)');
     return _preFieldDao.createEquipmentItem(
       id: id,
       name: name,
@@ -407,6 +500,7 @@ Future<void> updateFieldSessionBasicInfo({
     bool? isActive,
     required String performedBy,
   }) {
+    _log.t('updateEquipmentItem(equipmentId: $equipmentId)');
     return _preFieldDao.updateEquipmentItem(
       equipmentId: equipmentId,
       name: name,
@@ -421,6 +515,7 @@ Future<void> updateFieldSessionBasicInfo({
     required String equipmentId,
     required String performedBy,
   }) {
+    _log.t('deactivateEquipmentItem(equipmentId: $equipmentId)');
     return _preFieldDao.deactivateEquipmentItem(
       equipmentId: equipmentId,
       performedBy: performedBy,
@@ -429,6 +524,7 @@ Future<void> updateFieldSessionBasicInfo({
 
   @override
   Future<PreFieldSummaryEntity> getPreFieldSummary(String sessionId) async {
+    _log.t('getPreFieldSummary(sessionId: $sessionId)');
     final summaryData = await _preFieldDao.getPreFieldSummary(sessionId);
     return summaryData.toEntity();
   }

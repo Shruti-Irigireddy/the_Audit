@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/vehicle/domain/dtos/vehicle_dtos.dart';
 
 part 'vehicle_dao.g.dart';
@@ -17,9 +18,10 @@ const _uuid = Uuid();
     SyncQueue,
   ],
 )
-
 class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
   VehicleDao(super.db);
+
+  static const _log = AppLogger('VehicleDao');
 
   Future<String> createVehicleWithChecklist({
     String? vehicleId,
@@ -35,101 +37,108 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
     String? notes,
     required List<ChecklistItemDraft> checklistItems,
   }) async {
-    _validateVehicleType(type);
-    _validateChecklistItems(checklistItems);
+    _log.t(
+      'createVehicleWithChecklist(vehicleId: $vehicleId, name: $name, '
+      'type: $type, items: ${checklistItems.length})',
+    );
+    return _log.trace('createVehicleWithChecklist', () async {
+      _validateVehicleType(type);
+      _validateChecklistItems(checklistItems);
 
-    final resolvedVehicleId = vehicleId ?? _uuid.v4();
-    final templateId = _uuid.v4();
+      final resolvedVehicleId = vehicleId ?? _uuid.v4();
+      final templateId = _uuid.v4();
 
-    await transaction(() async {
-      await into(db.vehicles).insert(
-        VehiclesCompanion.insert(
-          id: resolvedVehicleId,
-          name: name.trim(),
-          type: type,
-          frameMake: Value(frameMake),
-          frameModel: Value(frameModel),
-          motorCount: Value(motorCount),
-          frameStyle: Value(frameStyle),
-          firmwareTarget: Value(firmwareTarget),
-          defaultFailSafeProfile: Value(defaultFailSafeProfile),
-          notes: Value(notes),
-        ),
-      );
-
-      await into(db.vehicleChecklistTemplates).insert(
-        VehicleChecklistTemplatesCompanion.insert(
-          id: templateId,
-          vehicleId: resolvedVehicleId,
-          version: 1,
-          createdBy: Value(createdByUserId),
-        ),
-      );
-
-      for (var i = 0; i < checklistItems.length; i++) {
-        final item = checklistItems[i];
-
-        await into(db.checklistItems).insert(
-          ChecklistItemsCompanion.insert(
-            id: _uuid.v4(),
-            templateId: templateId,
-            section: item.section.trim(),
-            label: item.label.trim(),
-            responseType: item.responseType,
-            isRequired: Value(item.isRequired),
-            blocksArming: Value(item.blocksArming),
-            sortOrder: i + 1,
+      await transaction(() async {
+        await into(db.vehicles).insert(
+          VehiclesCompanion.insert(
+            id: resolvedVehicleId,
+            name: name.trim(),
+            type: type,
+            frameMake: Value(frameMake),
+            frameModel: Value(frameModel),
+            motorCount: Value(motorCount),
+            frameStyle: Value(frameStyle),
+            firmwareTarget: Value(firmwareTarget),
+            defaultFailSafeProfile: Value(defaultFailSafeProfile),
+            notes: Value(notes),
           ),
         );
-      }
 
-      await _insertAuditEvent(
-        entityType: 'VEHICLE',
-        entityId: resolvedVehicleId,
-        action: 'CREATE',
-        description: 'Vehicle and checklist template created',
-        performedBy: createdByUserId,
-      );
+        await into(db.vehicleChecklistTemplates).insert(
+          VehicleChecklistTemplatesCompanion.insert(
+            id: templateId,
+            vehicleId: resolvedVehicleId,
+            version: 1,
+            createdBy: Value(createdByUserId),
+          ),
+        );
 
-      await _enqueueSync(
-        entityType: 'VEHICLE',
-        entityId: resolvedVehicleId,
-        operation: 'INSERT',
-      );
+        for (var i = 0; i < checklistItems.length; i++) {
+          final item = checklistItems[i];
 
-      await _enqueueSync(
-        entityType: 'VEHICLE_CHECKLIST_TEMPLATE',
-        entityId: templateId,
-        operation: 'INSERT',
-      );
+          await into(db.checklistItems).insert(
+            ChecklistItemsCompanion.insert(
+              id: _uuid.v4(),
+              templateId: templateId,
+              section: item.section.trim(),
+              label: item.label.trim(),
+              responseType: item.responseType,
+              isRequired: Value(item.isRequired),
+              blocksArming: Value(item.blocksArming),
+              sortOrder: i + 1,
+            ),
+          );
+        }
+
+        await _insertAuditEvent(
+          entityType: 'VEHICLE',
+          entityId: resolvedVehicleId,
+          action: 'CREATE',
+          description: 'Vehicle and checklist template created',
+          performedBy: createdByUserId,
+        );
+
+        await _enqueueSync(
+          entityType: 'VEHICLE',
+          entityId: resolvedVehicleId,
+          operation: 'INSERT',
+        );
+
+        await _enqueueSync(
+          entityType: 'VEHICLE_CHECKLIST_TEMPLATE',
+          entityId: templateId,
+          operation: 'INSERT',
+        );
+      });
+
+      return resolvedVehicleId;
     });
-
-    return resolvedVehicleId;
   }
 
   Future<Vehicle?> getVehicleById(String vehicleId) {
-    return (select(db.vehicles)..where((v) => v.id.equals(vehicleId)))
-        .getSingleOrNull();
+    _log.t('getVehicleById(vehicleId: $vehicleId)');
+    return (select(
+      db.vehicles,
+    )..where((v) => v.id.equals(vehicleId))).getSingleOrNull();
   }
 
   Future<List<Vehicle>> getActiveVehicles() {
+    _log.t('getActiveVehicles()');
     return (select(db.vehicles)
           ..where((v) => v.status.equals('ACTIVE'))
-          ..orderBy([
-            (v) => OrderingTerm.asc(v.name),
-          ]))
+          ..orderBy([(v) => OrderingTerm.asc(v.name)]))
         .get();
   }
 
   Future<List<Vehicle>> getAllVehicles() {
-    return (select(db.vehicles)
-          ..orderBy([
-            (v) => OrderingTerm.asc(v.name),
-          ]))
-        .get();
+    _log.t('getAllVehicles()');
+    return (select(
+      db.vehicles,
+    )..orderBy([(v) => OrderingTerm.asc(v.name)])).get();
   }
 
   Future<List<Vehicle>> searchVehicles(String query) {
+    _log.t('searchVehicles(query: $query)');
     final normalizedQuery = query.trim();
 
     if (normalizedQuery.isEmpty) {
@@ -147,9 +156,7 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
                 v.frameMake.like(likeQuery) |
                 v.frameModel.like(likeQuery),
           )
-          ..orderBy([
-            (v) => OrderingTerm.asc(v.name),
-          ]))
+          ..orderBy([(v) => OrderingTerm.asc(v.name)]))
         .get();
   }
 
@@ -167,55 +174,63 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
     String? notes,
     required String performedBy,
   }) async {
-    await _requireVehicle(vehicleId);
+    _log.t(
+      'updateVehicle(vehicleId: $vehicleId, type: $type, status: $status)',
+    );
+    return _log.trace('updateVehicle', () async {
+      await _requireVehicle(vehicleId);
 
-    if (type != null) {
-      _validateVehicleType(type);
-    }
+      if (type != null) {
+        _validateVehicleType(type);
+      }
 
-    if (status != null) {
-      _validateVehicleStatus(status);
-    }
+      if (status != null) {
+        _validateVehicleStatus(status);
+      }
 
-    await transaction(() async {
-      await (update(db.vehicles)..where((v) => v.id.equals(vehicleId)))
-          .write(
-        VehiclesCompanion(
-          name: name == null ? const Value.absent() : Value(name.trim()),
-          type: type == null ? const Value.absent() : Value(type),
-          frameMake:
-              frameMake == null ? const Value.absent() : Value(frameMake),
-          frameModel:
-              frameModel == null ? const Value.absent() : Value(frameModel),
-          motorCount:
-              motorCount == null ? const Value.absent() : Value(motorCount),
-          frameStyle:
-              frameStyle == null ? const Value.absent() : Value(frameStyle),
-          firmwareTarget: firmwareTarget == null
-              ? const Value.absent()
-              : Value(firmwareTarget),
-          defaultFailSafeProfile: defaultFailSafeProfile == null
-              ? const Value.absent()
-              : Value(defaultFailSafeProfile),
-          status: status == null ? const Value.absent() : Value(status),
-          notes: notes == null ? const Value.absent() : Value(notes),
-          updatedAt: Value(DateTime.now()),
-        ),
-      );
+      await transaction(() async {
+        await (update(db.vehicles)..where((v) => v.id.equals(vehicleId))).write(
+          VehiclesCompanion(
+            name: name == null ? const Value.absent() : Value(name.trim()),
+            type: type == null ? const Value.absent() : Value(type),
+            frameMake: frameMake == null
+                ? const Value.absent()
+                : Value(frameMake),
+            frameModel: frameModel == null
+                ? const Value.absent()
+                : Value(frameModel),
+            motorCount: motorCount == null
+                ? const Value.absent()
+                : Value(motorCount),
+            frameStyle: frameStyle == null
+                ? const Value.absent()
+                : Value(frameStyle),
+            firmwareTarget: firmwareTarget == null
+                ? const Value.absent()
+                : Value(firmwareTarget),
+            defaultFailSafeProfile: defaultFailSafeProfile == null
+                ? const Value.absent()
+                : Value(defaultFailSafeProfile),
+            status: status == null ? const Value.absent() : Value(status),
+            notes: notes == null ? const Value.absent() : Value(notes),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
 
-      await _insertAuditEvent(
-        entityType: 'VEHICLE',
-        entityId: vehicleId,
-        action: 'UPDATE',
-        description: 'Vehicle updated',
-        performedBy: performedBy,
-      );
+        await _insertAuditEvent(
+          entityType: 'VEHICLE',
+          entityId: vehicleId,
+          action: 'UPDATE',
+          description: 'Vehicle updated',
+          performedBy: performedBy,
+        );
 
-      await _enqueueSync(
-        entityType: 'VEHICLE',
-        entityId: vehicleId,
-        operation: 'UPDATE',
-      );
+        await _enqueueSync(
+          entityType: 'VEHICLE',
+          entityId: vehicleId,
+          operation: 'UPDATE',
+        );
+      });
     });
   }
 
@@ -223,6 +238,7 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
     required String vehicleId,
     required String performedBy,
   }) {
+    _log.t('markVehicleActive(vehicleId: $vehicleId)');
     return updateVehicle(
       vehicleId: vehicleId,
       status: 'ACTIVE',
@@ -234,6 +250,7 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
     required String vehicleId,
     required String performedBy,
   }) {
+    _log.t('markVehicleInactive(vehicleId: $vehicleId)');
     return updateVehicle(
       vehicleId: vehicleId,
       status: 'INACTIVE',
@@ -245,6 +262,7 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
     required String vehicleId,
     required String performedBy,
   }) {
+    _log.t('retireVehicle(vehicleId: $vehicleId)');
     return updateVehicle(
       vehicleId: vehicleId,
       status: 'RETIRED',
@@ -255,12 +273,11 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
   Future<VehicleChecklistTemplate?> getActiveChecklistTemplateForVehicle(
     String vehicleId,
   ) {
+    _log.t('getActiveChecklistTemplateForVehicle(vehicleId: $vehicleId)');
     return (select(db.vehicleChecklistTemplates)
           ..where((v) => v.vehicleId.equals(vehicleId))
           ..where((v) => v.isActive.equals(true))
-          ..orderBy([
-            (v) => OrderingTerm.desc(v.version),
-          ])
+          ..orderBy([(v) => OrderingTerm.desc(v.version)])
           ..limit(1))
         .getSingleOrNull();
   }
@@ -268,33 +285,31 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
   Future<List<VehicleChecklistTemplate>> getChecklistTemplatesForVehicle(
     String vehicleId,
   ) {
+    _log.t('getChecklistTemplatesForVehicle(vehicleId: $vehicleId)');
     return (select(db.vehicleChecklistTemplates)
           ..where((v) => v.vehicleId.equals(vehicleId))
-          ..orderBy([
-            (v) => OrderingTerm.desc(v.version),
-          ]))
+          ..orderBy([(v) => OrderingTerm.desc(v.version)]))
         .get();
   }
 
   Future<List<ChecklistItem>> getChecklistForVehicle(String vehicleId) async {
+    _log.t('getChecklistForVehicle(vehicleId: $vehicleId)');
     final template = await getActiveChecklistTemplateForVehicle(vehicleId);
 
     if (template == null) {
+      _log.d('No active checklist template for vehicle $vehicleId');
       return [];
     }
 
     return getChecklistItemsForTemplate(template.id);
   }
 
-  Future<List<ChecklistItem>> getChecklistItemsForTemplate(
-    String templateId,
-  ) {
+  Future<List<ChecklistItem>> getChecklistItemsForTemplate(String templateId) {
+    _log.t('getChecklistItemsForTemplate(templateId: $templateId)');
     return (select(db.checklistItems)
           ..where((v) => v.templateId.equals(templateId))
           ..where((v) => v.isActive.equals(true))
-          ..orderBy([
-            (v) => OrderingTerm.asc(v.sortOrder),
-          ]))
+          ..orderBy([(v) => OrderingTerm.asc(v.sortOrder)]))
         .get();
   }
 
@@ -304,86 +319,94 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
     required String createdBy,
     String? deactivationReason,
   }) async {
-    await _requireVehicle(vehicleId);
-    _validateChecklistItems(checklistItems);
-
-    final existingTemplates = await getChecklistTemplatesForVehicle(vehicleId);
-
-    final maxVersion = existingTemplates.fold<int>(
-      0,
-      (currentMax, template) =>
-          template.version > currentMax ? template.version : currentMax,
+    _log.t(
+      'createNewChecklistVersionForVehicle(vehicleId: $vehicleId, '
+      'items: ${checklistItems.length})',
     );
+    return _log.trace('createNewChecklistVersionForVehicle', () async {
+      await _requireVehicle(vehicleId);
+      _validateChecklistItems(checklistItems);
 
-    final nextVersion = maxVersion + 1;
-    final newTemplateId = _uuid.v4();
-    final now = DateTime.now();
-
-    await transaction(() async {
-      await (update(db.vehicleChecklistTemplates)
-            ..where((v) =>
-                v.vehicleId.equals(vehicleId) &
-                v.isActive.equals(true)))
-          .write(
-        VehicleChecklistTemplatesCompanion(
-          isActive: const Value(false),
-          deactivatedAt: Value(now),
-          deactivatedBy: Value(createdBy),
-          deactivationReason: Value(
-            deactivationReason ?? 'Replaced by version $nextVersion',
-          ),
-          updatedAt: Value(now),
-        ),
+      final existingTemplates = await getChecklistTemplatesForVehicle(
+        vehicleId,
       );
 
-      await into(db.vehicleChecklistTemplates).insert(
-        VehicleChecklistTemplatesCompanion.insert(
-          id: newTemplateId,
-          vehicleId: vehicleId,
-          version: nextVersion,
-          createdBy: Value(createdBy),
-        ),
+      final maxVersion = existingTemplates.fold<int>(
+        0,
+        (currentMax, template) =>
+            template.version > currentMax ? template.version : currentMax,
       );
 
-      for (var i = 0; i < checklistItems.length; i++) {
-        final item = checklistItems[i];
+      final nextVersion = maxVersion + 1;
+      _log.d('Creating checklist version $nextVersion for vehicle $vehicleId');
+      final newTemplateId = _uuid.v4();
+      final now = DateTime.now();
 
-        await into(db.checklistItems).insert(
-          ChecklistItemsCompanion.insert(
-            id: _uuid.v4(),
-            templateId: newTemplateId,
-            section: item.section.trim(),
-            label: item.label.trim(),
-            responseType: item.responseType,
-            isRequired: Value(item.isRequired),
-            blocksArming: Value(item.blocksArming),
-            sortOrder: i + 1,
+      await transaction(() async {
+        await (update(db.vehicleChecklistTemplates)..where(
+              (v) => v.vehicleId.equals(vehicleId) & v.isActive.equals(true),
+            ))
+            .write(
+              VehicleChecklistTemplatesCompanion(
+                isActive: const Value(false),
+                deactivatedAt: Value(now),
+                deactivatedBy: Value(createdBy),
+                deactivationReason: Value(
+                  deactivationReason ?? 'Replaced by version $nextVersion',
+                ),
+                updatedAt: Value(now),
+              ),
+            );
+
+        await into(db.vehicleChecklistTemplates).insert(
+          VehicleChecklistTemplatesCompanion.insert(
+            id: newTemplateId,
+            vehicleId: vehicleId,
+            version: nextVersion,
+            createdBy: Value(createdBy),
           ),
         );
-      }
 
-      await _insertAuditEvent(
-        entityType: 'VEHICLE',
-        entityId: vehicleId,
-        action: 'CHECKLIST_VERSION_CREATED',
-        description: 'Checklist version $nextVersion created',
-        performedBy: createdBy,
-      );
+        for (var i = 0; i < checklistItems.length; i++) {
+          final item = checklistItems[i];
 
-      await _enqueueSync(
-        entityType: 'VEHICLE_CHECKLIST_TEMPLATE',
-        entityId: newTemplateId,
-        operation: 'INSERT',
-      );
+          await into(db.checklistItems).insert(
+            ChecklistItemsCompanion.insert(
+              id: _uuid.v4(),
+              templateId: newTemplateId,
+              section: item.section.trim(),
+              label: item.label.trim(),
+              responseType: item.responseType,
+              isRequired: Value(item.isRequired),
+              blocksArming: Value(item.blocksArming),
+              sortOrder: i + 1,
+            ),
+          );
+        }
 
-      await _enqueueSync(
-        entityType: 'VEHICLE',
-        entityId: vehicleId,
-        operation: 'UPDATE',
-      );
+        await _insertAuditEvent(
+          entityType: 'VEHICLE',
+          entityId: vehicleId,
+          action: 'CHECKLIST_VERSION_CREATED',
+          description: 'Checklist version $nextVersion created',
+          performedBy: createdBy,
+        );
+
+        await _enqueueSync(
+          entityType: 'VEHICLE_CHECKLIST_TEMPLATE',
+          entityId: newTemplateId,
+          operation: 'INSERT',
+        );
+
+        await _enqueueSync(
+          entityType: 'VEHICLE',
+          entityId: vehicleId,
+          operation: 'UPDATE',
+        );
+      });
+
+      return newTemplateId;
     });
-
-    return newTemplateId;
   }
 
   Future<void> deactivateChecklistTemplate({
@@ -391,43 +414,46 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
     required String deactivatedBy,
     String? deactivationReason,
   }) async {
-    final template = await _requireChecklistTemplate(templateId);
-    final now = DateTime.now();
+    _log.t('deactivateChecklistTemplate(templateId: $templateId)');
+    return _log.trace('deactivateChecklistTemplate', () async {
+      final template = await _requireChecklistTemplate(templateId);
+      final now = DateTime.now();
 
-    await transaction(() async {
-      await (update(db.vehicleChecklistTemplates)
-            ..where((v) => v.id.equals(templateId)))
-          .write(
-        VehicleChecklistTemplatesCompanion(
-          isActive: const Value(false),
-          deactivatedAt: Value(now),
-          deactivatedBy: Value(deactivatedBy),
-          deactivationReason: Value(
-            deactivationReason ?? 'Checklist template deactivated',
+      await transaction(() async {
+        await (update(
+          db.vehicleChecklistTemplates,
+        )..where((v) => v.id.equals(templateId))).write(
+          VehicleChecklistTemplatesCompanion(
+            isActive: const Value(false),
+            deactivatedAt: Value(now),
+            deactivatedBy: Value(deactivatedBy),
+            deactivationReason: Value(
+              deactivationReason ?? 'Checklist template deactivated',
+            ),
+            updatedAt: Value(now),
           ),
-          updatedAt: Value(now),
-        ),
-      );
+        );
 
-      await _insertAuditEvent(
-        entityType: 'VEHICLE_CHECKLIST_TEMPLATE',
-        entityId: templateId,
-        action: 'DEACTIVATE',
-        description: 'Checklist template deactivated',
-        performedBy: deactivatedBy,
-      );
+        await _insertAuditEvent(
+          entityType: 'VEHICLE_CHECKLIST_TEMPLATE',
+          entityId: templateId,
+          action: 'DEACTIVATE',
+          description: 'Checklist template deactivated',
+          performedBy: deactivatedBy,
+        );
 
-      await _enqueueSync(
-        entityType: 'VEHICLE_CHECKLIST_TEMPLATE',
-        entityId: templateId,
-        operation: 'UPDATE',
-      );
+        await _enqueueSync(
+          entityType: 'VEHICLE_CHECKLIST_TEMPLATE',
+          entityId: templateId,
+          operation: 'UPDATE',
+        );
 
-      await _enqueueSync(
-        entityType: 'VEHICLE',
-        entityId: template.vehicleId,
-        operation: 'UPDATE',
-      );
+        await _enqueueSync(
+          entityType: 'VEHICLE',
+          entityId: template.vehicleId,
+          operation: 'UPDATE',
+        );
+      });
     });
   }
 
@@ -435,6 +461,7 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
     final vehicle = await getVehicleById(vehicleId);
 
     if (vehicle == null) {
+      _log.w('Vehicle not found: $vehicleId');
       throw Exception('Vehicle not found: $vehicleId');
     }
 
@@ -444,11 +471,12 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
   Future<VehicleChecklistTemplate> _requireChecklistTemplate(
     String templateId,
   ) async {
-    final template = await (select(db.vehicleChecklistTemplates)
-          ..where((v) => v.id.equals(templateId)))
-        .getSingleOrNull();
+    final template = await (select(
+      db.vehicleChecklistTemplates,
+    )..where((v) => v.id.equals(templateId))).getSingleOrNull();
 
     if (template == null) {
+      _log.w('Checklist template not found: $templateId');
       throw Exception('Checklist template not found: $templateId');
     }
 
@@ -456,40 +484,37 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
   }
 
   void _validateVehicleType(String type) {
-    const allowedTypes = {
-      'MULTIROTOR',
-      'FIXED_WING',
-      'VTOL',
-    };
+    const allowedTypes = {'MULTIROTOR', 'FIXED_WING', 'VTOL'};
 
     if (!allowedTypes.contains(type)) {
+      _log.w('Invalid vehicle type: $type');
       throw Exception('Invalid vehicle type: $type');
     }
   }
 
   void _validateVehicleStatus(String status) {
-    const allowedStatuses = {
-      'ACTIVE',
-      'INACTIVE',
-      'RETIRED',
-    };
+    const allowedStatuses = {'ACTIVE', 'INACTIVE', 'RETIRED'};
 
     if (!allowedStatuses.contains(status)) {
+      _log.w('Invalid vehicle status: $status');
       throw Exception('Invalid vehicle status: $status');
     }
   }
 
   void _validateChecklistItems(List<ChecklistItemDraft> checklistItems) {
     if (checklistItems.isEmpty) {
+      _log.w('Vehicle checklist cannot be empty.');
       throw Exception('Vehicle checklist cannot be empty.');
     }
 
     for (final item in checklistItems) {
       if (item.section.trim().isEmpty) {
+        _log.w('Checklist item section cannot be empty.');
         throw Exception('Checklist item section cannot be empty.');
       }
 
       if (item.label.trim().isEmpty) {
+        _log.w('Checklist item label cannot be empty.');
         throw Exception('Checklist item label cannot be empty.');
       }
 
@@ -498,14 +523,10 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
   }
 
   void _validateChecklistResponseType(String responseType) {
-    const allowedResponseTypes = {
-      'PASS_FAIL_NA',
-      'VALUE',
-      'CHECKBOX',
-      'TEXT',
-    };
+    const allowedResponseTypes = {'PASS_FAIL_NA', 'VALUE', 'CHECKBOX', 'TEXT'};
 
     if (!allowedResponseTypes.contains(responseType)) {
+      _log.w('Invalid checklist response type: $responseType');
       throw Exception('Invalid checklist response type: $responseType');
     }
   }

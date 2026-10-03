@@ -3,9 +3,12 @@ import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:flutter/material.dart';
 
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
+
+const _log = AppLogger('Profile');
 
 class ProfilePage extends StatefulWidget {
   final AppDatabase database;
@@ -28,21 +31,38 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   void initState() {
     super.initState();
+    _log.t('initState');
     _user = _loadUser();
+  }
+
+  @override
+  void dispose() {
+    _log.t('dispose');
+    super.dispose();
   }
 
   Future<User?> _loadUser() async {
     final firebaseUser = firebase_auth.FirebaseAuth.instance.currentUser;
-    if (firebaseUser == null) return null;
+    if (firebaseUser == null) {
+      _log.w('no firebase user');
+      return null;
+    }
 
     final userByUid = await (widget.database.select(
       widget.database.users,
     )..where((row) => row.id.equals(firebaseUser.uid))).getSingleOrNull();
 
-    if (userByUid != null) return userByUid;
+    if (userByUid != null) {
+      _log.d('local user found by uid');
+      return userByUid;
+    }
 
     final email = firebaseUser.email?.trim().toLowerCase();
-    if (email == null || email.isEmpty) return null;
+    if (email == null || email.isEmpty) {
+      _log.w('no local user and no email');
+      return null;
+    }
+    _log.d('looking up local user by ${AppLogger.mask(email)}');
 
     return (widget.database.select(
       widget.database.users,
@@ -51,22 +71,27 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _logout() async {
     if (_isLoggingOut) return;
+    _log.i('logout tapped');
 
-    setState(() => _isLoggingOut = true);
+    await _log.trace('logout', () async {
+      setState(() => _isLoggingOut = true);
 
-    try {
-      await firebase_auth.FirebaseAuth.instance.signOut();
-      await widget.authCubit.clearSession();
+      try {
+        await firebase_auth.FirebaseAuth.instance.signOut();
+        await widget.authCubit.clearSession();
+        _log.i('logged out');
 
-      if (!mounted) return;
-      Navigator.of(context).pop();
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _isLoggingOut = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Could not log out: $error')));
-    }
+        if (!mounted) return;
+        Navigator.of(context).pop();
+      } catch (error, stackTrace) {
+        _log.e('logout failed', error, stackTrace);
+        if (!mounted) return;
+        setState(() => _isLoggingOut = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not log out: $error')));
+      }
+    });
   }
 
   @override

@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/core/utils/theme.dart';
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_state.dart';
 import 'package:the_audit/features/vehicle/domain/dtos/vehicle_dtos.dart';
@@ -78,6 +79,8 @@ enum _VehicleType {
 }
 
 const _uuid = Uuid();
+const _log = AppLogger('CreateSession');
+const _dialogLog = AppLogger('VehicleDetailsDialog');
 
 /// IN_PROGRESS -> In progress, DATA_COLLECTION -> Data collection.
 String _humanize(String dbValue) {
@@ -190,6 +193,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   @override
   void initState() {
     super.initState();
+    _log.t('initState');
     _loadVehicles();
     _loadUsers();
     _loadEquipment();
@@ -201,6 +205,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
 
   @override
   void dispose() {
+    _log.t('dispose');
     _locationController.dispose();
     _latitudeController.dispose();
     _longitudeController.dispose();
@@ -215,6 +220,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   Future<void> _loadEquipment() async {
     try {
       final items = await widget.database.preFieldDao.getActiveEquipmentList();
+      _log.d('loaded ${items.length} equipment items');
       if (!mounted) return;
       setState(() {
         _equipmentRows.addAll([
@@ -224,7 +230,8 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         if (_equipmentRows.isEmpty) _equipmentRows.add(_EquipmentRow());
         _loadingEquipment = false;
       });
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _log.e('load equipment failed', error, stackTrace);
       if (!mounted) return;
       setState(() {
         if (_equipmentRows.isEmpty) _equipmentRows.add(_EquipmentRow());
@@ -249,7 +256,10 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
       child: PopScope(
         canPop: _step == 0,
         onPopInvokedWithResult: (didPop, _) {
-          if (!didPop) setState(() => _step--);
+          if (!didPop) {
+            _log.d('system back: step $_step -> ${_step - 1}');
+            setState(() => _step--);
+          }
         },
         child: Scaffold(
           appBar: const NavBar(),
@@ -281,7 +291,10 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
                     count: _stepTitles.length,
                     onStepTap: (index) {
                       // Only completed steps can be revisited from here.
-                      if (index < _step) setState(() => _step = index);
+                      if (index < _step) {
+                        _log.d('stepper tap: step $_step -> $index');
+                        setState(() => _step = index);
+                      }
                     },
                   ),
                   const SizedBox(height: 18),
@@ -373,14 +386,20 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
 
   void _back() {
     if (_step == 0) {
+      _log.d('back: leaving create session');
       Navigator.of(context).pop();
     } else {
+      _log.d('back: step $_step -> ${_step - 1}');
       setState(() => _step--);
     }
   }
 
   void _next() {
-    if (_step == 0 && !_formKey.currentState!.validate()) return;
+    if (_step == 0 && !_formKey.currentState!.validate()) {
+      _log.d('next: step 0 form invalid');
+      return;
+    }
+    _log.d('next: step $_step -> ${_step + 1}');
     FocusScope.of(context).unfocus();
     setState(() => _step++);
   }
@@ -486,6 +505,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
               .toList(),
           onChanged: (value) {
             if (value == null) return;
+            _log.d('mission type: ${value.dbValue}');
             setState(() => _missionType = value);
           },
         ),
@@ -504,6 +524,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
               .toList(),
           onChanged: (value) {
             if (value == null) return;
+            _log.d('session status: ${value.dbValue}');
             setState(() => _sessionStatus = value);
           },
         ),
@@ -587,6 +608,9 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
                   ),
                   IconButton(
                     onPressed: () => setState(() {
+                      _log.d(
+                        'equipment row removed (${_equipmentRows.length - 1} left)',
+                      );
                       _equipmentRows.remove(row);
                       row.dispose();
                     }),
@@ -599,8 +623,10 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           Align(
             alignment: Alignment.centerLeft,
             child: OutlinedButton.icon(
-              onPressed: () =>
-                  setState(() => _equipmentRows.add(_EquipmentRow())),
+              onPressed: () => setState(() {
+                _equipmentRows.add(_EquipmentRow());
+                _log.d('equipment row added (${_equipmentRows.length} rows)');
+              }),
               icon: const Icon(Icons.add),
               label: const Text('Add item'),
             ),
@@ -632,8 +658,10 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
                 for (final row in items)
                   CheckboxListTile(
                     value: row.packed,
-                    onChanged: (value) =>
-                        setState(() => row.packed = value ?? false),
+                    onChanged: (value) => setState(() {
+                      row.packed = value ?? false;
+                      _log.d('packed "${row.name.text.trim()}": ${row.packed}');
+                    }),
                     title: Text(row.name.text.trim()),
                     secondary: row.value.text.trim().isEmpty
                         ? null
@@ -744,86 +772,99 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   /// Creates the session with everything entered so far. [start] opens the
   /// session (flights); otherwise returns to the home page.
   Future<void> _saveSession({required bool start}) async {
-    if (_step == 0 && !_formKey.currentState!.validate()) return;
-
-    final authState = widget.authCubit.state;
-    final database = widget.database;
-    final cubit = context.read<PreFieldCubit>();
-
-    setState(() => _submitting = true);
-
-    try {
-      final createdBy = await _resolvePerformedBy(database, authState);
-
-      await cubit.createFieldSession(
-        date: _sessionDate,
-        locationName: _locationController.text.trim(),
-        latitude: double.parse(_latitudeController.text.trim()),
-        longitude: double.parse(_longitudeController.text.trim()),
-        missionType: _missionType.dbValue,
-        sessionStatus: _sessionStatus.dbValue,
-        createdBy: createdBy,
-      );
-
-      final sessionId = cubit.state.selectedSession?.sessionId;
-      if (sessionId == null) {
-        throw Exception('Session was not created.');
-      }
-
-      for (final vehicleId in _selectedVehicleIds) {
-        await cubit.addVehicleToSession(
-          sessionId: sessionId,
-          vehicleId: vehicleId,
-          performedBy: createdBy,
-        );
-      }
-
-      final teamMembers = <({String userId, String role})>[
-        if (_picUserId != null) (userId: _picUserId!, role: 'PIC'),
-        if (_voUserId != null) (userId: _voUserId!, role: 'VO'),
-        for (final crewUserId in _crewUserIds)
-          (userId: crewUserId, role: 'CREW'),
-      ];
-
-      for (final member in teamMembers) {
-        await cubit.addUserToSession(
-          sessionId: sessionId,
-          userId: member.userId,
-          role: member.role,
-          performedBy: createdBy,
-        );
-      }
-
-      await _saveEquipment(
-        database: database,
-        sessionId: sessionId,
-        performedBy: createdBy,
-      );
-
-      if (!mounted) return;
-      if (!start) {
-        Navigator.of(context).pop(true);
-        return;
-      }
-      await Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => SessionLoopPage(
-            database: database,
-            authCubit: widget.authCubit,
-            sessionId: sessionId,
-          ),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
-    } finally {
-      if (mounted) {
-        setState(() => _submitting = false);
-      }
+    _log.d(start ? 'start session tapped' : 'save tapped');
+    if (_step == 0 && !_formKey.currentState!.validate()) {
+      _log.d('save: step 0 form invalid');
+      return;
     }
+
+    await _log.trace('saveSession', () async {
+      final authState = widget.authCubit.state;
+      final database = widget.database;
+      final cubit = context.read<PreFieldCubit>();
+
+      setState(() => _submitting = true);
+
+      try {
+        final createdBy = await _resolvePerformedBy(database, authState);
+
+        await cubit.createFieldSession(
+          date: _sessionDate,
+          locationName: _locationController.text.trim(),
+          latitude: double.parse(_latitudeController.text.trim()),
+          longitude: double.parse(_longitudeController.text.trim()),
+          missionType: _missionType.dbValue,
+          sessionStatus: _sessionStatus.dbValue,
+          createdBy: createdBy,
+        );
+
+        final sessionId = cubit.state.selectedSession?.sessionId;
+        if (sessionId == null) {
+          throw Exception('Session was not created.');
+        }
+        _log.i('session created $sessionId');
+
+        for (final vehicleId in _selectedVehicleIds) {
+          await cubit.addVehicleToSession(
+            sessionId: sessionId,
+            vehicleId: vehicleId,
+            performedBy: createdBy,
+          );
+        }
+        _log.d('added ${_selectedVehicleIds.length} vehicles');
+
+        final teamMembers = <({String userId, String role})>[
+          if (_picUserId != null) (userId: _picUserId!, role: 'PIC'),
+          if (_voUserId != null) (userId: _voUserId!, role: 'VO'),
+          for (final crewUserId in _crewUserIds)
+            (userId: crewUserId, role: 'CREW'),
+        ];
+
+        for (final member in teamMembers) {
+          await cubit.addUserToSession(
+            sessionId: sessionId,
+            userId: member.userId,
+            role: member.role,
+            performedBy: createdBy,
+          );
+        }
+        _log.d('added ${teamMembers.length} team members');
+
+        await _saveEquipment(
+          database: database,
+          sessionId: sessionId,
+          performedBy: createdBy,
+        );
+
+        if (!mounted) return;
+        if (!start) {
+          _log.i('session saved, returning home');
+          Navigator.of(context).pop(true);
+          return;
+        }
+        _log.i('starting session loop');
+        await Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            settings: const RouteSettings(name: 'SessionLoop'),
+            builder: (_) => SessionLoopPage(
+              database: database,
+              authCubit: widget.authCubit,
+              sessionId: sessionId,
+            ),
+          ),
+        );
+      } catch (error, stackTrace) {
+        _log.e('save session failed', error, stackTrace);
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
+      } finally {
+        if (mounted) {
+          setState(() => _submitting = false);
+        }
+      }
+    });
   }
 
   /// Saves each equipment row as a session check: the item (reusing a saved
@@ -834,32 +875,42 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     required String sessionId,
     required String performedBy,
   }) async {
-    final dao = database.preFieldDao;
-    final known = {
-      for (final item in await dao.getActiveEquipmentList())
-        item.name.trim().toLowerCase(): item.id,
-    };
+    await _log.trace('saveEquipment', () async {
+      final dao = database.preFieldDao;
+      final known = {
+        for (final item in await dao.getActiveEquipmentList())
+          item.name.trim().toLowerCase(): item.id,
+      };
 
-    for (final row in _filledEquipment) {
-      final name = row.name.text.trim();
-      final value = row.value.text.trim();
-      final equipmentId =
-          known[name.toLowerCase()] ??
-          await dao.createEquipmentItem(
-            name: name,
-            category: 'General',
-            performedBy: performedBy,
-          );
-      known[name.toLowerCase()] = equipmentId;
+      final rows = _filledEquipment;
+      var created = 0;
+      for (final row in rows) {
+        final name = row.name.text.trim();
+        final value = row.value.text.trim();
+        final existingId = known[name.toLowerCase()];
+        if (existingId == null) created++;
+        final equipmentId =
+            existingId ??
+            await dao.createEquipmentItem(
+              name: name,
+              category: 'General',
+              performedBy: performedBy,
+            );
+        known[name.toLowerCase()] = equipmentId;
 
-      await dao.addCustomEquipmentCheckToSession(
-        sessionId: sessionId,
-        equipmentId: equipmentId,
-        isPacked: row.packed,
-        notes: value.isEmpty ? null : value,
-        checkedBy: performedBy,
+        await dao.addCustomEquipmentCheckToSession(
+          sessionId: sessionId,
+          equipmentId: equipmentId,
+          isPacked: row.packed,
+          notes: value.isEmpty ? null : value,
+          checkedBy: performedBy,
+        );
+      }
+      _log.d(
+        'saved ${rows.length} equipment checks '
+        '(${rows.where((r) => r.packed).length} packed, $created new items)',
       );
-    }
+    });
   }
 
   Future<void> _loadVehicles() async {
@@ -867,12 +918,14 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
 
     try {
       final vehicles = await database.vehicleDao.getActiveVehicles();
+      _log.d('loaded ${vehicles.length} vehicles');
       if (!mounted) return;
       setState(() {
         _vehicles = vehicles;
         _loadingVehicles = false;
       });
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('load vehicles failed', error, stackTrace);
       if (!mounted) return;
       setState(() => _loadingVehicles = false);
       ScaffoldMessenger.of(
@@ -888,12 +941,14 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
       final users = await (database.select(
         database.users,
       )..orderBy([(row) => OrderingTerm.asc(row.name)])).get();
+      _log.d('loaded ${users.length} users');
       if (!mounted) return;
       setState(() {
         _users = users;
         _loadingUsers = false;
       });
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('load users failed', error, stackTrace);
       if (!mounted) return;
       setState(() => _loadingUsers = false);
       ScaffoldMessenger.of(
@@ -906,88 +961,116 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   /// first. [automatic] is the run on page open: it never jumps to system
   /// settings and never overwrites coordinates the user has typed.
   Future<void> _useCurrentLocation({bool automatic = false}) async {
-    setState(() => _gettingCurrentLocation = true);
+    _log.d(automatic ? 'auto location capture' : 'location button tapped');
+    await _log.trace('useCurrentLocation', () async {
+      setState(() => _gettingCurrentLocation = true);
 
-    // Values this run filled in, so they aren't mistaken for user input.
-    String? filledLat;
-    String? filledLng;
-    bool userTyped() {
-      final lat = _latitudeController.text.trim();
-      final lng = _longitudeController.text.trim();
-      return (lat.isNotEmpty && lat != filledLat) ||
-          (lng.isNotEmpty && lng != filledLng);
-    }
-
-    void fill(Position position) {
-      if (automatic && userTyped()) return;
-      _setCoordinates(position);
-      filledLat = _latitudeController.text.trim();
-      filledLng = _longitudeController.text.trim();
-    }
-
-    try {
-      var permission = await Geolocator.checkPermission();
-
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
+      // Values this run filled in, so they aren't mistaken for user input.
+      String? filledLat;
+      String? filledLng;
+      bool userTyped() {
+        final lat = _latitudeController.text.trim();
+        final lng = _longitudeController.text.trim();
+        return (lat.isNotEmpty && lat != filledLat) ||
+            (lng.isNotEmpty && lng != filledLng);
       }
 
-      if (permission == LocationPermission.denied) {
-        _showSnack(
-          automatic
-              ? 'Location not shared. Enter coordinates or tap the location button.'
-              : 'Location permission denied.',
-        );
-        return;
+      void fill(Position position) {
+        if (automatic && userTyped()) {
+          _log.d('auto location: kept user-typed coordinates');
+          return;
+        }
+        _setCoordinates(position);
+        filledLat = _latitudeController.text.trim();
+        filledLng = _longitudeController.text.trim();
       }
-
-      if (permission == LocationPermission.deniedForever) {
-        _showSnack(
-          'Location permission permanently denied. Enable it from app settings.',
-        );
-        if (!automatic) await Geolocator.openAppSettings();
-        return;
-      }
-
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-
-      if (!serviceEnabled) {
-        _showSnack('Location is turned off. Please enable GPS/location.');
-        if (!automatic) await Geolocator.openLocationSettings();
-        return;
-      }
-
-      // Fill instantly from the cached fix, then refine with a fresh one.
-      final lastKnown = await Geolocator.getLastKnownPosition();
-      if (lastKnown != null && mounted) {
-        fill(lastKnown);
-      }
-
-      const locationSettings = LocationSettings(
-        accuracy: LocationAccuracy.high,
-        timeLimit: Duration(seconds: 15),
-      );
 
       try {
-        final position = await Geolocator.getCurrentPosition(
-          locationSettings: locationSettings,
+        var permission = await Geolocator.checkPermission();
+        _log.d('location permission: ${permission.name}');
+
+        if (permission == LocationPermission.denied) {
+          permission = await Geolocator.requestPermission();
+          _log.d('location permission requested: ${permission.name}');
+        }
+
+        if (permission == LocationPermission.denied) {
+          _log.w('location permission denied');
+          _showSnack(
+            automatic
+                ? 'Location not shared. Enter coordinates or tap the location button.'
+                : 'Location permission denied.',
+          );
+          return;
+        }
+
+        if (permission == LocationPermission.deniedForever) {
+          _log.w('location permission denied forever');
+          _showSnack(
+            'Location permission permanently denied. Enable it from app settings.',
+          );
+          if (!automatic) await Geolocator.openAppSettings();
+          return;
+        }
+
+        final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+        _log.d('location service enabled: $serviceEnabled');
+
+        if (!serviceEnabled) {
+          _log.w('location service disabled');
+          _showSnack('Location is turned off. Please enable GPS/location.');
+          if (!automatic) await Geolocator.openLocationSettings();
+          return;
+        }
+
+        // Fill instantly from the cached fix, then refine with a fresh one.
+        final lastKnown = await Geolocator.getLastKnownPosition();
+        if (lastKnown != null && mounted) {
+          _log.d('using last known position ${_coords(lastKnown)}');
+          fill(lastKnown);
+        } else {
+          _log.d('no last known position');
+        }
+
+        const locationSettings = LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
         );
-        if (!mounted) return;
-        if (automatic && userTyped()) return;
-        fill(position);
-        _showSnack('Current location captured.');
-      } on TimeoutException {
-        if (lastKnown == null) rethrow;
-        _showSnack('Using last known location; a precise fix timed out.');
+
+        try {
+          final position = await Geolocator.getCurrentPosition(
+            locationSettings: locationSettings,
+          );
+          _log.i('location captured ${_coords(position)}');
+          if (!mounted) return;
+          if (automatic && userTyped()) {
+            _log.d('auto location: kept user-typed coordinates');
+            return;
+          }
+          fill(position);
+          _showSnack('Current location captured.');
+        } on TimeoutException {
+          if (lastKnown == null) {
+            _log.w('location fix timed out, no fallback');
+            rethrow;
+          }
+          _log.w('location fix timed out, kept last known position');
+          _showSnack('Using last known location; a precise fix timed out.');
+        }
+      } catch (error, stackTrace) {
+        _log.e('location capture failed', error, stackTrace);
+        _showSnack(error.toString().replaceFirst('Exception: ', ''));
+      } finally {
+        if (mounted) {
+          setState(() => _gettingCurrentLocation = false);
+        }
       }
-    } catch (error) {
-      _showSnack(error.toString().replaceFirst('Exception: ', ''));
-    } finally {
-      if (mounted) {
-        setState(() => _gettingCurrentLocation = false);
-      }
-    }
+    });
   }
+
+  static String _coords(Position position) =>
+      '(${position.latitude.toStringAsFixed(3)}, '
+      '${position.longitude.toStringAsFixed(3)})';
 
   void _setCoordinates(Position position) {
     setState(() {
@@ -1005,6 +1088,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   }
 
   void _toggleVehicle(String vehicleId, bool isSelected) {
+    _log.d('vehicle $vehicleId ${isSelected ? 'selected' : 'removed'}');
     setState(() {
       final selected = {..._selectedVehicleIds};
       if (isSelected) {
@@ -1017,6 +1101,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   }
 
   Future<void> _showTeamMemberDialog({required _TeamRole role}) async {
+    _log.d('team picker opened: ${role.label}');
     final selectedUserIds = await showDialog<Set<String>>(
       context: context,
       builder: (context) {
@@ -1091,7 +1176,11 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
       },
     );
 
-    if (selectedUserIds == null) return;
+    if (selectedUserIds == null) {
+      _log.d('team picker cancelled: ${role.label}');
+      return;
+    }
+    _log.d('team ${role.label} picked: ${selectedUserIds.length} user(s)');
 
     setState(() {
       switch (role) {
@@ -1108,104 +1197,122 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   /// One vehicle per type per session: saving a type's dialog replaces any
   /// vehicle previously picked for that type.
   Future<void> _openVehicleDetails(_VehicleType type) async {
-    final database = widget.database;
-    final authState = widget.authCubit.state;
-    final vehiclesOfType = [
-      for (final vehicle in _vehicles)
-        if (_VehicleType.fromDb(vehicle.type) == type) vehicle,
-    ];
-    final typeIds = {for (final vehicle in vehiclesOfType) vehicle.id};
-    Vehicle? current;
-    for (final vehicle in vehiclesOfType) {
-      if (_selectedVehicleIds.contains(vehicle.id)) current = vehicle;
-    }
-
-    final result = await showDialog<_VehicleDetailsResult>(
-      context: context,
-      builder: (_) => _VehicleDetailsDialog(
-        type: type,
-        savedVehicles: vehiclesOfType,
-        currentVehicle: current,
-      ),
-    );
-
-    if (result == null || !mounted) return;
-
-    if (result.remove) {
-      setState(() {
-        _selectedVehicleIds = _selectedVehicleIds.difference(typeIds);
-      });
-      return;
-    }
-
-    final draft = result.details!;
-    try {
-      final performedBy = await _resolvePerformedBy(database, authState);
-      var vehicleId = result.vehicleId;
-
-      if (vehicleId == null) {
-        vehicleId = await database.vehicleDao.createVehicleWithChecklist(
-          name: draft.name,
-          type: draft.type.dbValue,
-          frameMake: draft.frameMake,
-          frameModel: draft.frameModel,
-          motorCount: draft.motorCount,
-          frameStyle: draft.frameStyle,
-          firmwareTarget: draft.firmwareTarget,
-          defaultFailSafeProfile: draft.defaultFailSafeProfile,
-          notes: draft.notes,
-          createdByUserId: performedBy,
-          checklistItems: const [
-            ChecklistItemDraft(
-              section: 'General',
-              label: 'Visual inspection complete',
-              responseType: 'PASS_FAIL_NA',
-            ),
-          ],
-        );
-      } else {
-        final original = vehiclesOfType.firstWhere((v) => v.id == vehicleId);
-        if (_detailsChanged(original, draft)) {
-          // updateVehicle treats null as "unchanged", so a cleared text
-          // field is written as '' to actually clear it.
-          String? edited(String? before, String? after) =>
-              after ?? (before == null ? null : '');
-          await database.vehicleDao.updateVehicle(
-            vehicleId: vehicleId,
-            name: draft.name,
-            frameMake: edited(original.frameMake, draft.frameMake),
-            frameModel: edited(original.frameModel, draft.frameModel),
-            motorCount: draft.motorCount,
-            frameStyle: edited(original.frameStyle, draft.frameStyle),
-            firmwareTarget: edited(
-              original.firmwareTarget,
-              draft.firmwareTarget,
-            ),
-            defaultFailSafeProfile: edited(
-              original.defaultFailSafeProfile,
-              draft.defaultFailSafeProfile,
-            ),
-            notes: edited(original.notes, draft.notes),
-            performedBy: performedBy,
-          );
-        }
+    _log.d('vehicle type tapped: ${type.dbValue}');
+    await _log.trace('openVehicleDetails', () async {
+      final database = widget.database;
+      final authState = widget.authCubit.state;
+      final vehiclesOfType = [
+        for (final vehicle in _vehicles)
+          if (_VehicleType.fromDb(vehicle.type) == type) vehicle,
+      ];
+      final typeIds = {for (final vehicle in vehiclesOfType) vehicle.id};
+      Vehicle? current;
+      for (final vehicle in vehiclesOfType) {
+        if (_selectedVehicleIds.contains(vehicle.id)) current = vehicle;
       }
 
-      if (!mounted) return;
-      await _loadVehicles();
-      if (!mounted) return;
-      setState(() {
-        _selectedVehicleIds = {
-          ..._selectedVehicleIds.difference(typeIds),
-          vehicleId!,
-        };
-      });
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
-    }
+      final result = await showDialog<_VehicleDetailsResult>(
+        context: context,
+        builder: (_) => _VehicleDetailsDialog(
+          type: type,
+          savedVehicles: vehiclesOfType,
+          currentVehicle: current,
+        ),
+      );
+
+      if (result == null || !mounted) {
+        _log.d('vehicle dialog cancelled: ${type.dbValue}');
+        return;
+      }
+
+      if (result.remove) {
+        _log.d('vehicle dialog: removed ${type.dbValue}');
+        setState(() {
+          _selectedVehicleIds = _selectedVehicleIds.difference(typeIds);
+        });
+        return;
+      }
+
+      final draft = result.details!;
+      try {
+        final performedBy = await _resolvePerformedBy(database, authState);
+        var vehicleId = result.vehicleId;
+
+        if (vehicleId == null) {
+          _log.d('vehicle dialog: adding new ${draft.type.dbValue}');
+          vehicleId = await database.vehicleDao.createVehicleWithChecklist(
+            name: draft.name,
+            type: draft.type.dbValue,
+            frameMake: draft.frameMake,
+            frameModel: draft.frameModel,
+            motorCount: draft.motorCount,
+            frameStyle: draft.frameStyle,
+            firmwareTarget: draft.firmwareTarget,
+            defaultFailSafeProfile: draft.defaultFailSafeProfile,
+            notes: draft.notes,
+            createdByUserId: performedBy,
+            checklistItems: const [
+              ChecklistItemDraft(
+                section: 'General',
+                label: 'Visual inspection complete',
+                responseType: 'PASS_FAIL_NA',
+              ),
+            ],
+          );
+          _log.i('vehicle added $vehicleId (${draft.type.dbValue})');
+        } else {
+          final original = vehiclesOfType.firstWhere((v) => v.id == vehicleId);
+          if (_detailsChanged(original, draft)) {
+            _log.d(
+              'vehicle dialog: editing $vehicleId (${draft.type.dbValue})',
+            );
+            // updateVehicle treats null as "unchanged", so a cleared text
+            // field is written as '' to actually clear it.
+            String? edited(String? before, String? after) =>
+                after ?? (before == null ? null : '');
+            await database.vehicleDao.updateVehicle(
+              vehicleId: vehicleId,
+              name: draft.name,
+              frameMake: edited(original.frameMake, draft.frameMake),
+              frameModel: edited(original.frameModel, draft.frameModel),
+              motorCount: draft.motorCount,
+              frameStyle: edited(original.frameStyle, draft.frameStyle),
+              firmwareTarget: edited(
+                original.firmwareTarget,
+                draft.firmwareTarget,
+              ),
+              defaultFailSafeProfile: edited(
+                original.defaultFailSafeProfile,
+                draft.defaultFailSafeProfile,
+              ),
+              notes: edited(original.notes, draft.notes),
+              performedBy: performedBy,
+            );
+            _log.i('vehicle edited $vehicleId (${draft.type.dbValue})');
+          } else {
+            _log.d(
+              'vehicle picked $vehicleId (${draft.type.dbValue}), unchanged',
+            );
+          }
+        }
+
+        if (!mounted) return;
+        await _loadVehicles();
+        if (!mounted) return;
+        setState(() {
+          _selectedVehicleIds = {
+            ..._selectedVehicleIds.difference(typeIds),
+            vehicleId!,
+          };
+        });
+      } catch (error, stackTrace) {
+        _log.e('save vehicle details failed', error, stackTrace);
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    });
   }
 
   bool _detailsChanged(Vehicle vehicle, _NewVehicleDraft draft) {
@@ -1266,6 +1373,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     }
 
     final userId = uid != null && uid.isNotEmpty ? uid : _uuid.v4();
+    _log.w('no local user for ${AppLogger.mask(email)}, ensuring user $userId');
     await _ensureCurrentUser(database, authState, userId);
     return userId;
   }
@@ -1488,6 +1596,10 @@ class _VehicleDetailsDialogState extends State<_VehicleDetailsDialog> {
         widget.currentVehicle ??
         (widget.savedVehicles.isEmpty ? null : widget.savedVehicles.first);
     _choice = initial?.id ?? _newVehicle;
+    _dialogLog.t(
+      'initState ${widget.type.dbValue}: '
+      '${widget.savedVehicles.length} saved, initial $_choice',
+    );
     _fill(initial);
   }
 
@@ -1567,6 +1679,7 @@ class _VehicleDetailsDialogState extends State<_VehicleDetailsDialog> {
                     ],
                     onChanged: (value) {
                       if (value == null) return;
+                      _dialogLog.d('vehicle choice: $value');
                       setState(() {
                         _choice = value;
                         _fill(
@@ -1664,8 +1777,10 @@ class _VehicleDetailsDialogState extends State<_VehicleDetailsDialog> {
       actions: [
         if (widget.currentVehicle != null)
           TextButton(
-            onPressed: () =>
-                Navigator.of(context).pop(const _VehicleDetailsResult.remove()),
+            onPressed: () {
+              _dialogLog.d('remove tapped: ${widget.type.dbValue}');
+              Navigator.of(context).pop(const _VehicleDetailsResult.remove());
+            },
             style: TextButton.styleFrom(foregroundColor: AppColors.errorRed),
             child: const Text('Remove'),
           ),
@@ -1679,7 +1794,14 @@ class _VehicleDetailsDialogState extends State<_VehicleDetailsDialog> {
   }
 
   void _submit() {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      _dialogLog.d('submit: form invalid');
+      return;
+    }
+    _dialogLog.d(
+      'submit ${widget.type.dbValue}: '
+      '${_choice == _newVehicle ? 'new vehicle' : 'vehicle $_choice'}',
+    );
 
     Navigator.of(context).pop(
       _VehicleDetailsResult.save(

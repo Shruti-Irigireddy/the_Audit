@@ -1,5 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:the_audit/core/database/sql_log_interceptor.dart';
 
 import 'daos/vehicle/vehicle_dao.dart';
 import 'daos/payload/payload_dao.dart';
@@ -458,11 +460,14 @@ part 'app_database.g.dart';
   class AppDatabase extends _$AppDatabase {
     AppDatabase()
         : super(
-            driftDatabase(
-              name: 'the_audit.db',
-              // logStatements: true,
-            ),
+            _openConnection(),
           );
+
+    /// In debug builds every SQL statement is logged (see SqlLogInterceptor).
+    static QueryExecutor _openConnection() {
+      final executor = driftDatabase(name: 'the_audit.db');
+      return kDebugMode ? executor.interceptWith(SqlLogInterceptor()) : executor;
+    }
 
     @override
     int get schemaVersion => 2;

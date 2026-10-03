@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
@@ -23,6 +24,7 @@ import 'package:the_audit/features/pre_flight/presentation/cubit/pre_flight_cubi
 import 'package:the_audit/features/pre_flight/presentation/cubit/pre_flight_state.dart';
 
 const _uuid = Uuid();
+const _log = AppLogger('SessionScreen');
 
 enum _LoopStep { setup, checklist, postFlight }
 
@@ -61,6 +63,7 @@ class _SessionScreenState extends State<SessionScreen> {
   @override
   void initState() {
     super.initState();
+    _log.t('initState session ${widget.sessionId}');
     _preFieldCubit = PreFieldCubit(
       PreFieldRepositoryImpl(widget.database.preFieldDao),
     )..loadSession(widget.sessionId);
@@ -74,6 +77,7 @@ class _SessionScreenState extends State<SessionScreen> {
 
   @override
   void dispose() {
+    _log.t('dispose');
     _objectiveController.dispose();
     _objectiveNotesController.dispose();
     _issuesController.dispose();
@@ -114,7 +118,10 @@ class _SessionScreenState extends State<SessionScreen> {
                         children: [
                           _Header(
                             title: 'Session loop',
-                            onBack: () => Navigator.of(context).pop(),
+                            onBack: () {
+                              _log.d('back tapped');
+                              Navigator.of(context).pop();
+                            },
                           ),
                           const SizedBox(height: 16),
                           _LoopStepper(step: _step),
@@ -156,8 +163,14 @@ class _SessionScreenState extends State<SessionScreen> {
         selectedSessionVehicleId: _sessionVehicleId,
         selectedPicUserId: _picUserId,
         isSaving: isSaving,
-        onVehicleChanged: (value) => setState(() => _sessionVehicleId = value),
-        onPicChanged: (value) => setState(() => _picUserId = value),
+        onVehicleChanged: (value) {
+          _log.d('vehicle selected: $value');
+          setState(() => _sessionVehicleId = value);
+        },
+        onPicChanged: (value) {
+          _log.d('PIC selected: $value');
+          setState(() => _picUserId = value);
+        },
         onCreateSortie: _createSortie,
         onCloseSession: _closeSession,
       ),
@@ -180,11 +193,15 @@ class _SessionScreenState extends State<SessionScreen> {
     };
   }
 
-  Future<void> _createSortie() async {
+  Future<void> _createSortie() => _log.trace('createSortie', () async {
     final sessionVehicleId = _sessionVehicleId;
     final picUserId = _picUserId;
+    _log.i(
+      'start pre-flight tapped (vehicle: $sessionVehicleId, pic: $picUserId)',
+    );
 
     if (sessionVehicleId == null || picUserId == null) {
+      _log.w('create sortie blocked: vehicle or PIC missing');
       _showMessage('Select a vehicle and PIC.');
       return;
     }
@@ -206,114 +223,139 @@ class _SessionScreenState extends State<SessionScreen> {
         throw Exception('Sortie was not created.');
       }
 
+      _log.i('sortie created ${sortie.flightId}; step -> checklist');
       _sortie = sortie;
       setState(() => _step = _LoopStep.checklist);
     });
-  }
+  });
 
-  Future<void> _completePreFlightAndStart() async {
-    final sortie = _sortie;
-    if (sortie == null) return;
-
-    await _runBusy(() async {
-      final performedBy = await _resolvePerformedBy();
-      final checklistResponses = [
-        for (final item in _preFlightCubit.state.checklistItems)
-          ChecklistResponseDraft(
-            itemId: item.id,
-            response: _defaultChecklistResponse(item.responseType),
-          ),
-      ];
-
-      if (checklistResponses.isNotEmpty) {
-        await _preFlightCubit.saveChecklistResponses(
-          flightId: sortie.flightId,
-          responses: checklistResponses,
-          createdBy: performedBy,
-        );
-      }
-
-      await _preFlightCubit.submitGoNoGoDecision(
-        flightId: sortie.flightId,
-        finalDecision: 'GO',
-        decisionBy: performedBy,
-      );
-      await _preFlightCubit.markFlightInProgress(
-        flightId: sortie.flightId,
-        takeoffAt: DateTime.now(),
-        performedBy: performedBy,
-      );
-      await _preFlightCubit.recordLanding(
-        flightId: sortie.flightId,
-        landingAt: DateTime.now(),
-        performedBy: performedBy,
-      );
-      await _postFlightCubit.loadSetup(sortie.flightId);
-      setState(() => _step = _LoopStep.postFlight);
-    });
-  }
-
-  Future<void> _savePostFlight({required bool closeSession}) async {
-    final sortie = _sortie;
-    if (sortie == null) return;
-
-    await _runBusy(() async {
-      final performedBy = await _resolvePerformedBy();
-      await _postFlightCubit.savePostFlightNote(
-        flightId: sortie.flightId,
-        objectiveResult: 'COMPLETED',
-        objectiveNotes: _emptyToNull(_objectiveNotesController.text),
-        issuesEncountered: _emptyToNull(_issuesController.text),
-        notes: _emptyToNull(_notesController.text),
-        followUpRequired: _issuesController.text.trim().isNotEmpty,
-        followUpStatus: _issuesController.text.trim().isEmpty ? null : 'OPEN',
-        createdBy: performedBy,
-      );
-
-      await _postFlightCubit.closeSortie(
-        flightId: sortie.flightId,
-        closedBy: performedBy,
-      );
-
-      if (closeSession) {
-        await _preFieldCubit.closeFieldSession(
-          sessionId: widget.sessionId,
-          closedBy: performedBy,
-        );
-        if (!mounted) return;
-        Navigator.of(context).pop();
+  Future<void> _completePreFlightAndStart() => _log.trace(
+    'completePreFlightAndStart',
+    () async {
+      final sortie = _sortie;
+      _log.i('complete flight tapped (flight: ${sortie?.flightId})');
+      if (sortie == null) {
+        _log.w('complete flight skipped: no sortie');
         return;
       }
 
-      _objectiveController.clear();
-      _objectiveNotesController.clear();
-      _issuesController.clear();
-      _notesController.clear();
-      _sessionVehicleId = null;
-      _picUserId = null;
-      _sortie = null;
-      await _preFieldCubit.loadSession(widget.sessionId);
-      setState(() => _step = _LoopStep.setup);
-    });
-  }
+      await _runBusy(() async {
+        final performedBy = await _resolvePerformedBy();
+        final checklistResponses = [
+          for (final item in _preFlightCubit.state.checklistItems)
+            ChecklistResponseDraft(
+              itemId: item.id,
+              response: _defaultChecklistResponse(item.responseType),
+            ),
+        ];
 
-  Future<void> _closeSession() async {
+        _log.d('auto-filling ${checklistResponses.length} checklist responses');
+        if (checklistResponses.isNotEmpty) {
+          await _preFlightCubit.saveChecklistResponses(
+            flightId: sortie.flightId,
+            responses: checklistResponses,
+            createdBy: performedBy,
+          );
+        }
+
+        await _preFlightCubit.submitGoNoGoDecision(
+          flightId: sortie.flightId,
+          finalDecision: 'GO',
+          decisionBy: performedBy,
+        );
+        await _preFlightCubit.markFlightInProgress(
+          flightId: sortie.flightId,
+          takeoffAt: DateTime.now(),
+          performedBy: performedBy,
+        );
+        await _preFlightCubit.recordLanding(
+          flightId: sortie.flightId,
+          landingAt: DateTime.now(),
+          performedBy: performedBy,
+        );
+        await _postFlightCubit.loadSetup(sortie.flightId);
+        _log.i('flight ${sortie.flightId} landed; step -> postFlight');
+        setState(() => _step = _LoopStep.postFlight);
+      });
+    },
+  );
+
+  Future<void> _savePostFlight({required bool closeSession}) => _log.trace(
+    'savePostFlight',
+    () async {
+      final sortie = _sortie;
+      _log.i(
+        'save post-flight tapped (flight: ${sortie?.flightId}, '
+        'closeSession: $closeSession)',
+      );
+      if (sortie == null) {
+        _log.w('save post-flight skipped: no sortie');
+        return;
+      }
+
+      await _runBusy(() async {
+        final performedBy = await _resolvePerformedBy();
+        await _postFlightCubit.savePostFlightNote(
+          flightId: sortie.flightId,
+          objectiveResult: 'COMPLETED',
+          objectiveNotes: _emptyToNull(_objectiveNotesController.text),
+          issuesEncountered: _emptyToNull(_issuesController.text),
+          notes: _emptyToNull(_notesController.text),
+          followUpRequired: _issuesController.text.trim().isNotEmpty,
+          followUpStatus: _issuesController.text.trim().isEmpty ? null : 'OPEN',
+          createdBy: performedBy,
+        );
+
+        await _postFlightCubit.closeSortie(
+          flightId: sortie.flightId,
+          closedBy: performedBy,
+        );
+
+        if (closeSession) {
+          await _preFieldCubit.closeFieldSession(
+            sessionId: widget.sessionId,
+            closedBy: performedBy,
+          );
+          _log.i('session ${widget.sessionId} closed');
+          if (!mounted) return;
+          Navigator.of(context).pop();
+          return;
+        }
+
+        _objectiveController.clear();
+        _objectiveNotesController.clear();
+        _issuesController.clear();
+        _notesController.clear();
+        _sessionVehicleId = null;
+        _picUserId = null;
+        _sortie = null;
+        await _preFieldCubit.loadSession(widget.sessionId);
+        _log.i('sortie ${sortie.flightId} closed; step -> setup');
+        setState(() => _step = _LoopStep.setup);
+      });
+    },
+  );
+
+  Future<void> _closeSession() => _log.trace('closeSession', () async {
+    _log.i('close session tapped ${widget.sessionId}');
     await _runBusy(() async {
       final performedBy = await _resolvePerformedBy();
       await _preFieldCubit.closeFieldSession(
         sessionId: widget.sessionId,
         closedBy: performedBy,
       );
+      _log.i('session ${widget.sessionId} closed');
       if (!mounted) return;
       Navigator.of(context).pop();
     });
-  }
+  });
 
   Future<void> _runBusy(Future<void> Function() action) async {
     setState(() => _busy = true);
     try {
       await action();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('session action failed', error, stackTrace);
       _showMessage(error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -348,6 +390,7 @@ class _SessionScreenState extends State<SessionScreen> {
     }
 
     final userId = uid != null && uid.isNotEmpty ? uid : _uuid.v4();
+    _log.w('no local user; inserting placeholder $userId');
     await widget.database
         .into(widget.database.users)
         .insert(
@@ -404,12 +447,7 @@ class _Header extends StatelessWidget {
           tooltip: 'Back',
         ),
         const SizedBox(width: 6),
-        Expanded(
-          child: Text(
-            title,
-            style: AppTextStyles.pageTitle,
-          ),
-        ),
+        Expanded(child: Text(title, style: AppTextStyles.pageTitle)),
       ],
     );
   }
@@ -710,4 +748,3 @@ class _Panel extends StatelessWidget {
     );
   }
 }
-

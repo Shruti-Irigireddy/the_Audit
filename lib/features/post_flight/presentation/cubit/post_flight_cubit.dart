@@ -1,15 +1,19 @@
 import 'package:bloc/bloc.dart';
 
+import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/post_flight/domain/dtos/post_flight_dtos.dart';
 import 'package:the_audit/features/post_flight/domain/repositories/post_flight_repository.dart';
 import 'post_flight_state.dart';
 
 class PostFlightCubit extends Cubit<PostFlightState> {
+  static const _log = AppLogger('PostFlightCubit');
+
   final PostFlightRepository _repository;
 
   PostFlightCubit(this._repository) : super(PostFlightState.initial());
 
   Future<void> loadPendingSorties({String? sessionId, int limit = 50}) async {
+    _log.t('loadPendingSorties(session: $sessionId, limit: $limit)');
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.loading,
@@ -22,6 +26,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
         sessionId: sessionId,
         limit: limit,
       );
+      _log.d('${sorties.length} pending sorties loaded');
       emit(
         state.copyWith(
           viewStatus: PostFlightViewStatus.loaded,
@@ -29,12 +34,14 @@ class PostFlightCubit extends Cubit<PostFlightState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadPendingSorties failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> loadClosedSorties({String? sessionId, int limit = 50}) async {
+    _log.t('loadClosedSorties(session: $sessionId, limit: $limit)');
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.loading,
@@ -47,6 +54,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
         sessionId: sessionId,
         limit: limit,
       );
+      _log.d('${sorties.length} closed sorties loaded');
       emit(
         state.copyWith(
           viewStatus: PostFlightViewStatus.loaded,
@@ -54,12 +62,14 @@ class PostFlightCubit extends Cubit<PostFlightState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadClosedSorties failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> loadSetup(String flightId) async {
+    _log.t('loadSetup($flightId)');
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.loading,
@@ -77,6 +87,10 @@ class PostFlightCubit extends Cubit<PostFlightState> {
       );
       final allBatteriesHaveEndState = await _repository
           .allBatteriesHaveEndState(flightId);
+      _log.d(
+        'setup $flightId: ${batteries.length} batteries, '
+        '${payloads.length} payloads, $missingEndStates missing end states',
+      );
 
       emit(
         state.copyWith(
@@ -90,7 +104,8 @@ class PostFlightCubit extends Cubit<PostFlightState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('loadSetup failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -113,6 +128,9 @@ class PostFlightCubit extends Cubit<PostFlightState> {
     String? notes,
     required String createdBy,
   }) async {
+    _log.i(
+      'savePostFlightNote($flightId, objective: $objectiveResult, followUp: $followUpRequired)',
+    );
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.saving,
@@ -140,7 +158,8 @@ class PostFlightCubit extends Cubit<PostFlightState> {
         createdBy: createdBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('savePostFlightNote failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -150,6 +169,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
     required List<BatteryEndStateDraft> batteries,
     required String performedBy,
   }) async {
+    _log.i('saveBatteryEndStates($flightId, ${batteries.length} batteries)');
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.saving,
@@ -164,7 +184,8 @@ class PostFlightCubit extends Cubit<PostFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('saveBatteryEndStates failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -175,6 +196,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
     String? objectiveNotes,
     required String performedBy,
   }) async {
+    _log.i('updateObjectiveResult($flightId, $objectiveResult)');
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.saving,
@@ -190,7 +212,8 @@ class PostFlightCubit extends Cubit<PostFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('updateObjectiveResult failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -200,6 +223,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
     String? missionRating,
     required String performedBy,
   }) async {
+    _log.i('updateMissionRating($flightId, $missionRating)');
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.saving,
@@ -214,7 +238,8 @@ class PostFlightCubit extends Cubit<PostFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('updateMissionRating failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -226,6 +251,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
     String? logNotes,
     required String performedBy,
   }) async {
+    _log.i('updateLogDetails($flightId)');
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.saving,
@@ -242,7 +268,8 @@ class PostFlightCubit extends Cubit<PostFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('updateLogDetails failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -253,6 +280,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
     String? notes,
     required String performedBy,
   }) async {
+    _log.i('updateIssuesEncountered($flightId)');
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.saving,
@@ -268,7 +296,8 @@ class PostFlightCubit extends Cubit<PostFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('updateIssuesEncountered failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -282,6 +311,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
     DateTime? followUpDueDate,
     required String performedBy,
   }) async {
+    _log.i('updateFollowUpStatus($flightId, $followUpStatus)');
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.saving,
@@ -300,7 +330,8 @@ class PostFlightCubit extends Cubit<PostFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('updateFollowUpStatus failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -311,6 +342,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
     required String amendmentText,
     required String createdBy,
   }) async {
+    _log.i('addPostFlightAmendment($flightId)');
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.saving,
@@ -332,7 +364,8 @@ class PostFlightCubit extends Cubit<PostFlightState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('addPostFlightAmendment failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -344,6 +377,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
     int? percentEnd,
     required String performedBy,
   }) async {
+    _log.i('saveBatteryEndState($flightId, battery: $batteryId)');
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.saving,
@@ -360,12 +394,14 @@ class PostFlightCubit extends Cubit<PostFlightState> {
         performedBy: performedBy,
       );
       await loadSetup(flightId);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('saveBatteryEndState failed', error, stackTrace);
       _emitFailure(error);
     }
   }
 
   Future<void> validateCompletion(String flightId) async {
+    _log.t('validateCompletion($flightId)');
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.validating,
@@ -375,6 +411,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
 
     try {
       final issues = await _repository.validatePostFlightCompletion(flightId);
+      _log.d('validateCompletion($flightId): ${issues.length} issues');
       emit(
         state.copyWith(
           viewStatus: PostFlightViewStatus.loaded,
@@ -382,7 +419,8 @@ class PostFlightCubit extends Cubit<PostFlightState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('validateCompletion failed', error, stackTrace);
       _emitFailure(error);
     }
   }
@@ -391,6 +429,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
     required String flightId,
     required String closedBy,
   }) async {
+    _log.i('closeSortie($flightId)');
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.saving,
@@ -400,6 +439,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
 
     try {
       await _repository.closeSortie(flightId: flightId, closedBy: closedBy);
+      _log.i('sortie closed: $flightId');
       emit(
         state.copyWith(
           viewStatus: PostFlightViewStatus.loaded,
@@ -407,7 +447,8 @@ class PostFlightCubit extends Cubit<PostFlightState> {
           errorMessage: null,
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _log.e('closeSortie failed', error, stackTrace);
       _emitFailure(error);
     }
   }

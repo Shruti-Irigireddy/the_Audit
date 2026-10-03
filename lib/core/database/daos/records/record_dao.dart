@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/database/dtos/shared_dtos.dart';
+import 'package:the_audit/core/utils/app_logger.dart';
 export 'package:the_audit/core/database/dtos/shared_dtos.dart';
 
 part 'record_dao.g.dart';
@@ -40,13 +41,17 @@ final _uuid = Uuid();
 class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   RecordDao(super.db);
 
+  static const _log = AppLogger('RecordDao');
+
   Future<FieldSession?> getSessionById(String sessionId) {
+    _log.t('getSessionById(sessionId: $sessionId)');
     return (select(
       db.fieldSessions,
     )..where((v) => v.sessionId.equals(sessionId))).getSingleOrNull();
   }
 
   Future<List<FieldSession>> getRecentSessions({int limit = 50}) {
+    _log.t('getRecentSessions(limit: $limit)');
     return (select(db.fieldSessions)
           ..orderBy([
             (v) => OrderingTerm.desc(v.date),
@@ -57,6 +62,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   }
 
   Future<List<FieldSession>> getRecentClosedSessions({int limit = 50}) {
+    _log.t('getRecentClosedSessions(limit: $limit)');
     return (select(db.fieldSessions)
           ..where((v) => v.sessionStatus.equals('CLOSED'))
           ..orderBy([
@@ -68,6 +74,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   }
 
   Future<List<FieldSession>> getInProgressSessions({int limit = 50}) {
+    _log.t('getInProgressSessions(limit: $limit)');
     return (select(db.fieldSessions)
           ..where((v) => v.sessionStatus.equals('IN_PROGRESS'))
           ..orderBy([(v) => OrderingTerm.desc(v.updatedAt)])
@@ -84,6 +91,9 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
     String? picUserId,
     int limit = 50,
   }) async {
+    _log.t(
+      'searchSessions(query: $query, status: $status, vehicleId: $vehicleId, picUserId: $picUserId, limit: $limit)',
+    );
     final cleanQuery = query.trim();
     final normalizedStatus = status?.trim().toUpperCase();
 
@@ -102,19 +112,17 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
           db.vehicles,
           db.vehicles.id.equalsExp(db.sessionVehicles.vehicleId),
         ),
-      ])
-            ..where(db.vehicles.name.contains(cleanQuery)))
-          .get();
+      ])..where(db.vehicles.name.contains(cleanQuery))).get();
 
       matchingSessionIds.addAll(
-        vehicleMatches.map((row) => row.readTable(db.sessionVehicles).sessionId),
+        vehicleMatches.map(
+          (row) => row.readTable(db.sessionVehicles).sessionId,
+        ),
       );
 
       final userMatches = await (select(db.sorties).join([
         innerJoin(db.users, db.users.id.equalsExp(db.sorties.picUserId)),
-      ])
-            ..where(db.users.name.contains(cleanQuery)))
-          .get();
+      ])..where(db.users.name.contains(cleanQuery))).get();
 
       matchingSessionIds.addAll(
         userMatches.map((row) => row.readTable(db.sorties).sessionId),
@@ -142,16 +150,16 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
     }
 
     if (vehicleId != null && vehicleId.trim().isNotEmpty) {
-      final rows = await (select(db.sessionVehicles)
-            ..where((v) => v.vehicleId.equals(vehicleId)))
-          .get();
+      final rows = await (select(
+        db.sessionVehicles,
+      )..where((v) => v.vehicleId.equals(vehicleId))).get();
       selector.where((v) => v.sessionId.isIn(rows.map((row) => row.sessionId)));
     }
 
     if (picUserId != null && picUserId.trim().isNotEmpty) {
-      final rows = await (select(db.sorties)
-            ..where((v) => v.picUserId.equals(picUserId)))
-          .get();
+      final rows = await (select(
+        db.sorties,
+      )..where((v) => v.picUserId.equals(picUserId))).get();
       selector.where((v) => v.sessionId.isIn(rows.map((row) => row.sessionId)));
     }
 
@@ -159,6 +167,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   }
 
   Future<int> countSessionsByStatus(String status) async {
+    _log.t('countSessionsByStatus(status: $status)');
     final normalizedStatus = status.trim().toUpperCase();
     final countExp = db.fieldSessions.sessionId.count();
 
@@ -172,6 +181,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   }
 
   Future<List<SessionUserWithUser>> getSessionUsers(String sessionId) async {
+    _log.t('getSessionUsers(sessionId: $sessionId)');
     final query =
         select(db.sessionUsers).join([
             innerJoin(db.users, db.users.id.equalsExp(db.sessionUsers.userId)),
@@ -195,6 +205,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   Future<List<SessionVehicleWithVehicle>> getSessionVehicles(
     String sessionId,
   ) async {
+    _log.t('getSessionVehicles(sessionId: $sessionId)');
     final query =
         select(db.sessionVehicles).join([
             innerJoin(
@@ -218,6 +229,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   Future<List<Payload>> getPayloadsForSessionVehicle(
     String sessionVehicleId,
   ) async {
+    _log.t('getPayloadsForSessionVehicle(sessionVehicleId: $sessionVehicleId)');
     final query =
         select(db.sessionVehiclePayload).join([
             innerJoin(
@@ -240,6 +252,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   Future<List<SessionBatteryWithBattery>> getSessionBatteries(
     String sessionId,
   ) async {
+    _log.t('getSessionBatteries(sessionId: $sessionId)');
     final query =
         select(db.sessionBatteries).join([
             innerJoin(
@@ -263,6 +276,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   Future<List<SessionEquipmentCheckWithItem>> getSessionEquipmentChecks(
     String sessionId,
   ) async {
+    _log.t('getSessionEquipmentChecks(sessionId: $sessionId)');
     final query =
         select(db.sessionEquipmentChecks).join([
             innerJoin(
@@ -286,12 +300,14 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   }
 
   Future<Sorty?> getSortieById(String flightId) {
+    _log.t('getSortieById(flightId: $flightId)');
     return (select(
       db.sorties,
     )..where((v) => v.flightId.equals(flightId))).getSingleOrNull();
   }
 
   Future<List<Sorty>> getSortiesForSession(String sessionId) {
+    _log.t('getSortiesForSession(sessionId: $sessionId)');
     return (select(db.sorties)
           ..where((v) => v.sessionId.equals(sessionId))
           ..orderBy([(v) => OrderingTerm.asc(v.sequenceNo)]))
@@ -299,6 +315,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   }
 
   Future<List<Sorty>> getClosedSortiesForSession(String sessionId) {
+    _log.t('getClosedSortiesForSession(sessionId: $sessionId)');
     return (select(db.sorties)
           ..where(
             (v) =>
@@ -309,6 +326,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   }
 
   Future<List<SortieUserWithUser>> getSortieUsers(String flightId) async {
+    _log.t('getSortieUsers(flightId: $flightId)');
     final query =
         select(db.sortieUsers).join([
             innerJoin(db.users, db.users.id.equalsExp(db.sortieUsers.userId)),
@@ -332,6 +350,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   Future<List<SortiePayloadWithPayload>> getSortiePayloads(
     String flightId,
   ) async {
+    _log.t('getSortiePayloads(flightId: $flightId)');
     final query =
         select(db.sortiePayloads).join([
             innerJoin(
@@ -355,6 +374,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   Future<List<SortieBatteryWithBattery>> getSortieBatteries(
     String flightId,
   ) async {
+    _log.t('getSortieBatteries(flightId: $flightId)');
     final query =
         select(db.sortieBatteries).join([
             innerJoin(
@@ -378,6 +398,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   Future<List<ChecklistResponseWithItem>> getChecklistResponsesForFlight(
     String flightId,
   ) async {
+    _log.t('getChecklistResponsesForFlight(flightId: $flightId)');
     final query =
         select(db.checklistResponses).join([
             innerJoin(
@@ -399,6 +420,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   }
 
   Future<List<ChecklistOverride>> getOverridesForFlight(String flightId) {
+    _log.t('getOverridesForFlight(flightId: $flightId)');
     return (select(db.checklistOverrides)
           ..where((v) => v.flightId.equals(flightId))
           ..orderBy([(v) => OrderingTerm.asc(v.createdAt)]))
@@ -406,6 +428,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   }
 
   Future<PostFlightNote?> getPostFlightNoteForFlight(String flightId) {
+    _log.t('getPostFlightNoteForFlight(flightId: $flightId)');
     return (select(
       db.postFlightNotes,
     )..where((v) => v.flightId.equals(flightId))).getSingleOrNull();
@@ -415,6 +438,9 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
     required String entityType,
     required String entityId,
   }) {
+    _log.t(
+      'getAuditEventsForEntity(entityType: $entityType, entityId: $entityId)',
+    );
     final normalizedEntityType = _normalizeEntityType(entityType);
 
     return (select(db.auditEvents)
@@ -428,6 +454,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   }
 
   Future<List<AuditEvent>> getAuditTrailForSession(String sessionId) async {
+    _log.t('getAuditTrailForSession(sessionId: $sessionId)');
     final entityIds = await _collectSessionEntityIds(sessionId);
 
     if (entityIds.isEmpty) {
@@ -441,6 +468,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   }
 
   Future<List<AuditEvent>> getRecentAuditEvents({int limit = 100}) {
+    _log.t('getRecentAuditEvents(limit: $limit)');
     return (select(db.auditEvents)
           ..orderBy([(v) => OrderingTerm.desc(v.performedAt)])
           ..limit(limit))
@@ -454,38 +482,44 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
     required String amendmentText,
     required String createdBy,
   }) async {
-    final normalizedEntityType = _normalizeEntityType(entityType);
+    _log.t(
+      'addRecordAmendment(id: $id, entityType: $entityType, entityId: $entityId)',
+    );
+    return _log.trace('addRecordAmendment', () async {
+      final normalizedEntityType = _normalizeEntityType(entityType);
 
-    if (amendmentText.trim().isEmpty) {
-      throw Exception('Amendment text cannot be empty.');
-    }
+      if (amendmentText.trim().isEmpty) {
+        _log.w('Amendment text cannot be empty.');
+        throw Exception('Amendment text cannot be empty.');
+      }
 
-    await transaction(() async {
-      final amendmentId = id ?? _uuid.v4();
+      await transaction(() async {
+        final amendmentId = id ?? _uuid.v4();
 
-      await into(db.recordAmendments).insert(
-        RecordAmendmentsCompanion.insert(
-          id: amendmentId,
+        await into(db.recordAmendments).insert(
+          RecordAmendmentsCompanion.insert(
+            id: amendmentId,
+            entityType: normalizedEntityType,
+            entityId: entityId,
+            amendmentText: amendmentText,
+            createdBy: createdBy,
+          ),
+        );
+
+        await _insertAuditEvent(
           entityType: normalizedEntityType,
           entityId: entityId,
-          amendmentText: amendmentText,
-          createdBy: createdBy,
-        ),
-      );
+          action: 'AMEND',
+          description: amendmentText,
+          performedBy: createdBy,
+        );
 
-      await _insertAuditEvent(
-        entityType: normalizedEntityType,
-        entityId: entityId,
-        action: 'AMEND',
-        description: amendmentText,
-        performedBy: createdBy,
-      );
-
-      await _enqueueSync(
-        entityType: 'RECORD_AMENDMENT',
-        entityId: amendmentId,
-        operation: 'INSERT',
-      );
+        await _enqueueSync(
+          entityType: 'RECORD_AMENDMENT',
+          entityId: amendmentId,
+          operation: 'INSERT',
+        );
+      });
     });
   }
 
@@ -493,6 +527,9 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
     required String entityType,
     required String entityId,
   }) {
+    _log.t(
+      'getAmendmentsForEntity(entityType: $entityType, entityId: $entityId)',
+    );
     final normalizedEntityType = _normalizeEntityType(entityType);
 
     return (select(db.recordAmendments)
@@ -508,6 +545,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   Future<List<RecordAmendment>> getAmendmentsForSession(
     String sessionId,
   ) async {
+    _log.t('getAmendmentsForSession(sessionId: $sessionId)');
     final entityIds = await _collectSessionEntityIds(sessionId);
 
     if (entityIds.isEmpty) {
@@ -524,6 +562,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
     required String entityType,
     required String entityId,
   }) {
+    _log.t('getExportsForEntity(entityType: $entityType, entityId: $entityId)');
     final normalizedEntityType = _normalizeEntityType(entityType);
 
     return (select(db.exportRecords)
@@ -537,6 +576,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   }
 
   Future<List<ExportRecord>> getExportsForSession(String sessionId) {
+    _log.t('getExportsForSession(sessionId: $sessionId)');
     return getExportsForEntity(
       entityType: 'FIELD_SESSION',
       entityId: sessionId,
@@ -547,18 +587,20 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
     required String vehicleId,
     int limit = 50,
   }) async {
-    final query = select(db.sorties).join([
-      innerJoin(
-        db.sessionVehicles,
-        db.sessionVehicles.id.equalsExp(db.sorties.sessionVehicleId),
-      ),
-    ])
-      ..where(db.sessionVehicles.vehicleId.equals(vehicleId))
-      ..orderBy([
-        OrderingTerm.desc(db.sorties.landingAt),
-        OrderingTerm.desc(db.sorties.updatedAt),
-      ])
-      ..limit(limit);
+    _log.t('getSortiesForVehicle(vehicleId: $vehicleId, limit: $limit)');
+    final query =
+        select(db.sorties).join([
+            innerJoin(
+              db.sessionVehicles,
+              db.sessionVehicles.id.equalsExp(db.sorties.sessionVehicleId),
+            ),
+          ])
+          ..where(db.sessionVehicles.vehicleId.equals(vehicleId))
+          ..orderBy([
+            OrderingTerm.desc(db.sorties.landingAt),
+            OrderingTerm.desc(db.sorties.updatedAt),
+          ])
+          ..limit(limit);
 
     final rows = await query.get();
 
@@ -566,15 +608,17 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   }
 
   Future<int> countSortiesForVehicle(String vehicleId) async {
+    _log.t('countSortiesForVehicle(vehicleId: $vehicleId)');
     final countExp = db.sorties.flightId.count();
-    final query = selectOnly(db.sorties).join([
-      innerJoin(
-        db.sessionVehicles,
-        db.sessionVehicles.id.equalsExp(db.sorties.sessionVehicleId),
-      ),
-    ])
-      ..addColumns([countExp])
-      ..where(db.sessionVehicles.vehicleId.equals(vehicleId));
+    final query =
+        selectOnly(db.sorties).join([
+            innerJoin(
+              db.sessionVehicles,
+              db.sessionVehicles.id.equalsExp(db.sorties.sessionVehicleId),
+            ),
+          ])
+          ..addColumns([countExp])
+          ..where(db.sessionVehicles.vehicleId.equals(vehicleId));
 
     final row = await query.getSingle();
 
@@ -582,6 +626,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   }
 
   Future<int> countSessionsForSite(String locationName) async {
+    _log.t('countSessionsForSite(locationName: $locationName)');
     final countExp = db.fieldSessions.sessionId.count();
     final query = selectOnly(db.fieldSessions)
       ..addColumns([countExp])

@@ -1,6 +1,8 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:the_audit/core/utils/app_logger.dart';
+
 import '../../app_database.dart';
 
 part 'payload_dao.g.dart';
@@ -17,11 +19,12 @@ const _uuid = Uuid();
     SyncQueue,
   ],
 )
-
-class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
+class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
   PayloadDao(super.db);
 
-  Future<String> createPayload ({
+  static const _log = AppLogger('PayloadDao');
+
+  Future<String> createPayload({
     String? payloadId,
     required String name,
     required String category,
@@ -31,63 +34,70 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
     List<String> compatibleVehicleTypes = const [],
     required String performedBy,
   }) async {
-    final id = payloadId ?? _uuid.v4();
-    final resolvedStatus = status ?? 'ACTIVE';
+    _log.t(
+      'createPayload(payloadId: $payloadId, name: $name, category: $category, '
+      'types: ${compatibleVehicleTypes.length})',
+    );
+    return _log.trace('createPayload', () async {
+      final id = payloadId ?? _uuid.v4();
+      final resolvedStatus = status ?? 'ACTIVE';
 
-    await transaction(() async {
-      await into(db.payloads).insert(
-        PayloadsCompanion.insert(
-          payloadId: id,
-          name: name,
-          category: category,
-          storageType: Value(storageType),
-          storageCapacity: Value(storageCapacity),
-          status: Value(resolvedStatus),
-        ),
-      );
-
-      final uniqueTypes = _normalizeVehicleTypes(compatibleVehicleTypes);
-
-      for (final vehicleType in uniqueTypes) {
-        await _insertCompatibilityRow(
-          payloadId: id,
-          vehicleType: vehicleType,
+      await transaction(() async {
+        await into(db.payloads).insert(
+          PayloadsCompanion.insert(
+            payloadId: id,
+            name: name,
+            category: category,
+            storageType: Value(storageType),
+            storageCapacity: Value(storageCapacity),
+            status: Value(resolvedStatus),
+          ),
         );
-      }
 
-      await _insertAuditEvent(
-        entityType: 'PAYLOAD',
-        entityId: id,
-        action: 'CREATE',
-        description: 'Payload created',
-        performedBy: performedBy,
-      );
+        final uniqueTypes = _normalizeVehicleTypes(compatibleVehicleTypes);
 
-      await _enqueueSync(
-        entityType: 'PAYLOAD',
-        entityId: id,
-        operation: 'INSERT',
-      );
+        for (final vehicleType in uniqueTypes) {
+          await _insertCompatibilityRow(
+            payloadId: id,
+            vehicleType: vehicleType,
+          );
+        }
+
+        await _insertAuditEvent(
+          entityType: 'PAYLOAD',
+          entityId: id,
+          action: 'CREATE',
+          description: 'Payload created',
+          performedBy: performedBy,
+        );
+
+        await _enqueueSync(
+          entityType: 'PAYLOAD',
+          entityId: id,
+          operation: 'INSERT',
+        );
+      });
+
+      return id;
     });
-
-    return id;
   }
 
-  Future<Payload?> getPayloadById(String payloadId){
-    return (select(db.payloads)
-          ..where((v) => v.payloadId.equals(payloadId)))
-        .getSingleOrNull();
+  Future<Payload?> getPayloadById(String payloadId) {
+    _log.t('getPayloadById(payloadId: $payloadId)');
+    return (select(
+      db.payloads,
+    )..where((v) => v.payloadId.equals(payloadId))).getSingleOrNull();
   }
 
   Future<List<Payload>> getAllPayloads() {
-    return (select(db.payloads)
-          ..orderBy([
-            (v) => OrderingTerm.asc(v.name),
-          ]))
-        .get();
+    _log.t('getAllPayloads()');
+    return (select(
+      db.payloads,
+    )..orderBy([(v) => OrderingTerm.asc(v.name)])).get();
   }
 
   Future<List<Payload>> searchPayloads(String query) {
+    _log.t('searchPayloads(query: $query)');
     final cleanedQuery = query.trim();
 
     if (cleanedQuery.isEmpty) {
@@ -105,23 +115,22 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
                 v.storageType.like(likeQuery) |
                 v.storageCapacity.like(likeQuery),
           )
-          ..orderBy([
-            (v) => OrderingTerm.asc(v.name),
-          ]))
+          ..orderBy([(v) => OrderingTerm.asc(v.name)]))
         .get();
   }
 
-  Future<List<PayloadVehicleCompatibilityData>>
-      getCompatibilityRulesForPayload(String payloadId) {
+  Future<List<PayloadVehicleCompatibilityData>> getCompatibilityRulesForPayload(
+    String payloadId,
+  ) {
+    _log.t('getCompatibilityRulesForPayload(payloadId: $payloadId)');
     return (select(db.payloadVehicleCompatibility)
           ..where((v) => v.payloadId.equals(payloadId))
-          ..orderBy([
-            (v) => OrderingTerm.asc(v.vehicleType),
-          ]))
+          ..orderBy([(v) => OrderingTerm.asc(v.vehicleType)]))
         .get();
   }
 
   Future<List<String>> getCompatibleVehicleTypes(String payloadId) async {
+    _log.t('getCompatibleVehicleTypes(payloadId: $payloadId)');
     final rows = await getCompatibilityRulesForPayload(payloadId);
 
     return rows.map((row) => row.vehicleType).toList();
@@ -131,6 +140,10 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
     required String payloadId,
     required String vehicleType,
   }) async {
+    _log.t(
+      'isPayloadCompatibleWithVehicleType(payloadId: $payloadId, '
+      'vehicleType: $vehicleType)',
+    );
     final rows = await getCompatibilityRulesForPayload(payloadId);
 
     // No rows means unrestricted payload.
@@ -149,6 +162,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
   Future<List<Payload>> getPayloadsCompatibleWithVehicleType(
     String vehicleType,
   ) async {
+    _log.t('getPayloadsCompatibleWithVehicleType(vehicleType: $vehicleType)');
     final allPayloads = await getAllPayloads();
     final compatiblePayloads = <Payload>[];
 
@@ -163,36 +177,41 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
       }
     }
 
+    _log.d(
+      '${compatiblePayloads.length}/${allPayloads.length} payloads compatible '
+      'with $vehicleType',
+    );
     return compatiblePayloads;
   }
 
   Future<List<Payload>> getPayloadsExplicitlyCompatibleWithVehicleType(
     String vehicleType,
   ) async {
+    _log.t(
+      'getPayloadsExplicitlyCompatibleWithVehicleType(vehicleType: $vehicleType)',
+    );
     final normalizedVehicleType = vehicleType.trim().toUpperCase();
 
-    final query = select(db.payloads).join([
-      innerJoin(
-        db.payloadVehicleCompatibility,
-        db.payloadVehicleCompatibility.payloadId.equalsExp(
-          db.payloads.payloadId,
-        ),
-      ),
-    ])
-      ..where(
-        db.payloadVehicleCompatibility.vehicleType.equals(
-          normalizedVehicleType,
-        ),
-      )
-      ..orderBy([
-        OrderingTerm.asc(db.payloads.name),
-      ]);
+    final query =
+        select(db.payloads).join([
+            innerJoin(
+              db.payloadVehicleCompatibility,
+              db.payloadVehicleCompatibility.payloadId.equalsExp(
+                db.payloads.payloadId,
+              ),
+            ),
+          ])
+          ..where(
+            db.payloadVehicleCompatibility.vehicleType.equals(
+              normalizedVehicleType,
+            ),
+          )
+          ..orderBy([OrderingTerm.asc(db.payloads.name)]);
 
     final rows = await query.get();
 
     return rows.map((row) => row.readTable(db.payloads)).toList();
   }
-
 
   Future<void> updatePayload({
     required String payloadId,
@@ -203,38 +222,42 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
     String? status,
     required String performedBy,
   }) async {
-    await _requirePayloadExists(payloadId);
+    _log.t('updatePayload(payloadId: $payloadId, status: $status)');
+    return _log.trace('updatePayload', () async {
+      await _requirePayloadExists(payloadId);
 
-    await transaction(() async {
-      await (update(db.payloads)
-            ..where((v) => v.payloadId.equals(payloadId)))
-          .write(
-        PayloadsCompanion(
-          name: name == null ? const Value.absent() : Value(name),
-          category: category == null ? const Value.absent() : Value(category),
-          storageType:
-              storageType == null ? const Value.absent() : Value(storageType),
-          storageCapacity: storageCapacity == null
-              ? const Value.absent()
-              : Value(storageCapacity),
-          status: status == null ? const Value.absent() : Value(status),
-          updatedAt: Value(DateTime.now()),
-        ),
-      );
+      await transaction(() async {
+        await (update(
+          db.payloads,
+        )..where((v) => v.payloadId.equals(payloadId))).write(
+          PayloadsCompanion(
+            name: name == null ? const Value.absent() : Value(name),
+            category: category == null ? const Value.absent() : Value(category),
+            storageType: storageType == null
+                ? const Value.absent()
+                : Value(storageType),
+            storageCapacity: storageCapacity == null
+                ? const Value.absent()
+                : Value(storageCapacity),
+            status: status == null ? const Value.absent() : Value(status),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
 
-      await _insertAuditEvent(
-        entityType: 'PAYLOAD',
-        entityId: payloadId,
-        action: 'UPDATE',
-        description: 'Payload updated',
-        performedBy: performedBy,
-      );
+        await _insertAuditEvent(
+          entityType: 'PAYLOAD',
+          entityId: payloadId,
+          action: 'UPDATE',
+          description: 'Payload updated',
+          performedBy: performedBy,
+        );
 
-      await _enqueueSync(
-        entityType: 'PAYLOAD',
-        entityId: payloadId,
-        operation: 'UPDATE',
-      );
+        await _enqueueSync(
+          entityType: 'PAYLOAD',
+          entityId: payloadId,
+          operation: 'UPDATE',
+        );
+      });
     });
   }
 
@@ -242,6 +265,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
     required String payloadId,
     required String performedBy,
   }) {
+    _log.t('retirePayload(payloadId: $payloadId)');
     return updatePayload(
       payloadId: payloadId,
       status: 'RETIRED',
@@ -253,38 +277,44 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
     required String payloadId,
     required String performedBy,
   }) async {
-    await _requirePayloadExists(payloadId);
+    _log.t('deletePayload(payloadId: $payloadId)');
+    return _log.trace('deletePayload', () async {
+      await _requirePayloadExists(payloadId);
 
-    final usageCount = await _countPayloadUsage(payloadId);
+      final usageCount = await _countPayloadUsage(payloadId);
 
-    if (usageCount > 0) {
-      throw Exception(
-        'Cannot delete payload because it is already used in sessions or sorties.',
-      );
-    }
+      if (usageCount > 0) {
+        _log.w(
+          'Cannot delete payload $payloadId: used in $usageCount sessions/sorties',
+        );
+        throw Exception(
+          'Cannot delete payload because it is already used in sessions or sorties.',
+        );
+      }
 
-    await transaction(() async {
-      await (delete(db.payloadVehicleCompatibility)
-            ..where((v) => v.payloadId.equals(payloadId)))
-          .go();
+      await transaction(() async {
+        await (delete(
+          db.payloadVehicleCompatibility,
+        )..where((v) => v.payloadId.equals(payloadId))).go();
 
-      await (delete(db.payloads)
-            ..where((v) => v.payloadId.equals(payloadId)))
-          .go();
+        await (delete(
+          db.payloads,
+        )..where((v) => v.payloadId.equals(payloadId))).go();
 
-      await _insertAuditEvent(
-        entityType: 'PAYLOAD',
-        entityId: payloadId,
-        action: 'DELETE',
-        description: 'Payload deleted',
-        performedBy: performedBy,
-      );
+        await _insertAuditEvent(
+          entityType: 'PAYLOAD',
+          entityId: payloadId,
+          action: 'DELETE',
+          description: 'Payload deleted',
+          performedBy: performedBy,
+        );
 
-      await _enqueueSync(
-        entityType: 'PAYLOAD',
-        entityId: payloadId,
-        operation: 'DELETE',
-      );
+        await _enqueueSync(
+          entityType: 'PAYLOAD',
+          entityId: payloadId,
+          operation: 'DELETE',
+        );
+      });
     });
   }
 
@@ -293,35 +323,41 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
     required List<String> compatibleVehicleTypes,
     required String performedBy,
   }) async {
-    await _requirePayloadExists(payloadId);
+    _log.t(
+      'replacePayloadCompatibility(payloadId: $payloadId, '
+      'types: ${compatibleVehicleTypes.length})',
+    );
+    return _log.trace('replacePayloadCompatibility', () async {
+      await _requirePayloadExists(payloadId);
 
-    await transaction(() async {
-      await (delete(db.payloadVehicleCompatibility)
-            ..where((v) => v.payloadId.equals(payloadId)))
-          .go();
+      await transaction(() async {
+        await (delete(
+          db.payloadVehicleCompatibility,
+        )..where((v) => v.payloadId.equals(payloadId))).go();
 
-      final uniqueTypes = _normalizeVehicleTypes(compatibleVehicleTypes);
+        final uniqueTypes = _normalizeVehicleTypes(compatibleVehicleTypes);
 
-      for (final vehicleType in uniqueTypes) {
-        await _insertCompatibilityRow(
-          payloadId: payloadId,
-          vehicleType: vehicleType,
+        for (final vehicleType in uniqueTypes) {
+          await _insertCompatibilityRow(
+            payloadId: payloadId,
+            vehicleType: vehicleType,
+          );
+        }
+
+        await _insertAuditEvent(
+          entityType: 'PAYLOAD',
+          entityId: payloadId,
+          action: 'REPLACE_COMPATIBILITY',
+          description: 'Payload compatibility replaced',
+          performedBy: performedBy,
         );
-      }
 
-      await _insertAuditEvent(
-        entityType: 'PAYLOAD',
-        entityId: payloadId,
-        action: 'REPLACE_COMPATIBILITY',
-        description: 'Payload compatibility replaced',
-        performedBy: performedBy,
-      );
-
-      await _enqueueSync(
-        entityType: 'PAYLOAD',
-        entityId: payloadId,
-        operation: 'UPDATE',
-      );
+        await _enqueueSync(
+          entityType: 'PAYLOAD',
+          entityId: payloadId,
+          operation: 'UPDATE',
+        );
+      });
     });
   }
 
@@ -330,45 +366,54 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
     required String vehicleType,
     required String performedBy,
   }) async {
-    await _requirePayloadExists(payloadId);
+    _log.t(
+      'addPayloadCompatibility(payloadId: $payloadId, vehicleType: $vehicleType)',
+    );
+    return _log.trace('addPayloadCompatibility', () async {
+      await _requirePayloadExists(payloadId);
 
-    final normalizedVehicleType = vehicleType.trim().toUpperCase();
+      final normalizedVehicleType = vehicleType.trim().toUpperCase();
 
-    if (normalizedVehicleType.isEmpty) {
-      throw Exception('Vehicle type cannot be empty.');
-    }
+      if (normalizedVehicleType.isEmpty) {
+        _log.w('Vehicle type cannot be empty.');
+        throw Exception('Vehicle type cannot be empty.');
+      }
 
-    final existing = await (select(db.payloadVehicleCompatibility)
-          ..where(
-            (v) =>
-                v.payloadId.equals(payloadId) &
-                v.vehicleType.equals(normalizedVehicleType),
-          ))
-        .getSingleOrNull();
+      final existing =
+          await (select(db.payloadVehicleCompatibility)..where(
+                (v) =>
+                    v.payloadId.equals(payloadId) &
+                    v.vehicleType.equals(normalizedVehicleType),
+              ))
+              .getSingleOrNull();
 
-    if (existing != null) {
-      return;
-    }
+      if (existing != null) {
+        _log.d(
+          'Compatibility already exists: $payloadId $normalizedVehicleType',
+        );
+        return;
+      }
 
-    await transaction(() async {
-      await _insertCompatibilityRow(
-        payloadId: payloadId,
-        vehicleType: normalizedVehicleType,
-      );
+      await transaction(() async {
+        await _insertCompatibilityRow(
+          payloadId: payloadId,
+          vehicleType: normalizedVehicleType,
+        );
 
-      await _insertAuditEvent(
-        entityType: 'PAYLOAD',
-        entityId: payloadId,
-        action: 'ADD_COMPATIBILITY',
-        description: 'Payload compatibility added: $normalizedVehicleType',
-        performedBy: performedBy,
-      );
+        await _insertAuditEvent(
+          entityType: 'PAYLOAD',
+          entityId: payloadId,
+          action: 'ADD_COMPATIBILITY',
+          description: 'Payload compatibility added: $normalizedVehicleType',
+          performedBy: performedBy,
+        );
 
-      await _enqueueSync(
-        entityType: 'PAYLOAD',
-        entityId: payloadId,
-        operation: 'UPDATE',
-      );
+        await _enqueueSync(
+          entityType: 'PAYLOAD',
+          entityId: payloadId,
+          operation: 'UPDATE',
+        );
+      });
     });
   }
 
@@ -377,32 +422,37 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
     required String vehicleType,
     required String performedBy,
   }) async {
-    await _requirePayloadExists(payloadId);
+    _log.t(
+      'removePayloadCompatibility(payloadId: $payloadId, '
+      'vehicleType: $vehicleType)',
+    );
+    return _log.trace('removePayloadCompatibility', () async {
+      await _requirePayloadExists(payloadId);
 
-    final normalizedVehicleType = vehicleType.trim().toUpperCase();
+      final normalizedVehicleType = vehicleType.trim().toUpperCase();
 
-    await transaction(() async {
-      await (delete(db.payloadVehicleCompatibility)
-            ..where(
+      await transaction(() async {
+        await (delete(db.payloadVehicleCompatibility)..where(
               (v) =>
                   v.payloadId.equals(payloadId) &
                   v.vehicleType.equals(normalizedVehicleType),
             ))
-          .go();
+            .go();
 
-      await _insertAuditEvent(
-        entityType: 'PAYLOAD',
-        entityId: payloadId,
-        action: 'REMOVE_COMPATIBILITY',
-        description: 'Payload compatibility removed: $normalizedVehicleType',
-        performedBy: performedBy,
-      );
+        await _insertAuditEvent(
+          entityType: 'PAYLOAD',
+          entityId: payloadId,
+          action: 'REMOVE_COMPATIBILITY',
+          description: 'Payload compatibility removed: $normalizedVehicleType',
+          performedBy: performedBy,
+        );
 
-      await _enqueueSync(
-        entityType: 'PAYLOAD',
-        entityId: payloadId,
-        operation: 'UPDATE',
-      );
+        await _enqueueSync(
+          entityType: 'PAYLOAD',
+          entityId: payloadId,
+          operation: 'UPDATE',
+        );
+      });
     });
   }
 
@@ -410,6 +460,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
     final payload = await getPayloadById(payloadId);
 
     if (payload == null) {
+      _log.w('Payload not found: $payloadId');
       throw Exception('Payload not found: $payloadId');
     }
   }
@@ -435,13 +486,13 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin{
   }
 
   Future<int> _countPayloadUsage(String payloadId) async {
-    final sessionPayloads = await (select(db.sessionVehiclePayload)
-          ..where((v) => v.payloadId.equals(payloadId)))
-        .get();
+    final sessionPayloads = await (select(
+      db.sessionVehiclePayload,
+    )..where((v) => v.payloadId.equals(payloadId))).get();
 
-    final sortiePayloads = await (select(db.sortiePayloads)
-          ..where((v) => v.payloadId.equals(payloadId)))
-        .get();
+    final sortiePayloads = await (select(
+      db.sortiePayloads,
+    )..where((v) => v.payloadId.equals(payloadId))).get();
 
     return sessionPayloads.length + sortiePayloads.length;
   }
