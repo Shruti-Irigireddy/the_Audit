@@ -1,3 +1,10 @@
+/// Reserved users that are not real people.
+class DbUsers {
+  /// Author of data the app creates itself (e.g. the default fleet). Never
+  /// shown in people pickers.
+  static const systemUserId = 'system';
+}
+
 class DbEntityTypes {
   static const auditEvent = 'AUDIT_EVENT';
   static const battery = 'BATTERY';
@@ -48,4 +55,3 @@ class DbSyncOperations {
   static const update = 'UPDATE';
   static const delete = 'DELETE';
 }
-

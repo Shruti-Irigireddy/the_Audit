@@ -29,10 +29,7 @@ class SessionBatteryDraft {
   final String id;
   final String batteryId;
 
-  const SessionBatteryDraft({
-    required this.id,
-    required this.batteryId,
-  });
+  const SessionBatteryDraft({required this.id, required this.batteryId});
 }
 
 class PayloadCompatibilityIssue {

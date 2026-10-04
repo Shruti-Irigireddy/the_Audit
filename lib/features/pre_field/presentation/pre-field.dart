@@ -3,10 +3,11 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:drift/drift.dart' show InsertMode, OrderingTerm;
+import 'package:drift/drift.dart' show InsertMode;
 import 'package:uuid/uuid.dart';
 
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/database/dtos/equipment_dtos.dart';
 import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
@@ -173,9 +174,12 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
 
   final DateTime _sessionDate = DateTime.now();
   PreFieldMissionType _missionType = PreFieldMissionType.testing;
-  PreFieldSessionStatus _sessionStatus = PreFieldSessionStatus.inProgress;
+  PreFieldSessionStatus _sessionStatus = PreFieldSessionStatus.planned;
   List<Vehicle> _vehicles = [];
   List<User> _users = [];
+
+  /// Vehicles taken. Each vehicle is one unit; several of the same type are
+  /// separate vehicles.
   Set<String> _selectedVehicleIds = {};
   String? _picUserId;
   String? _voUserId;
@@ -187,8 +191,28 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
 
   /// Current wizard step: 0 details, 1 equipment, 2 packing, 3 review.
   int _step = 0;
-  final List<_EquipmentRow> _equipmentRows = [];
+
+  /// Equipment lists by key: [_toolsKey] for Tools, otherwise a vehicle id.
+  Map<String, List<EquipmentTemplateItem>> _equipmentLists = {};
   bool _loadingEquipment = true;
+
+  /// Template item ids ticked on the packing check.
+  Set<String> _packedItemIds = {};
+
+  /// Which list cards are open on step 2 and on step 3.
+  Set<String> _expandedLists = {};
+  Set<String> _expandedPacking = {};
+  Set<String> _expandedReview = {};
+
+  /// Active payloads and the vehicle types each fits (empty set = any type).
+  List<Payload> _payloads = [];
+  Map<String, Set<String>> _payloadTypes = {};
+
+  /// Payloads limited to specific vehicles: payload id -> vehicle ids.
+  Map<String, Set<String>> _payloadVehicleLimits = {};
+
+  /// Payloads taken, for all selected vehicles together.
+  Set<String> _selectedPayloadIds = {};
 
   @override
   void initState() {
@@ -196,7 +220,8 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     _log.t('initState');
     _loadVehicles();
     _loadUsers();
-    _loadEquipment();
+    _loadEquipmentLists();
+    _loadPayloads();
     // Capture the site location as soon as the page opens (FR-PFT-02).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _useCurrentLocation(automatic: true);
@@ -209,34 +234,67 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     _locationController.dispose();
     _latitudeController.dispose();
     _longitudeController.dispose();
-    for (final row in _equipmentRows) {
-      row.dispose();
-    }
     super.dispose();
   }
 
-  /// Pre-fill the equipment list with the saved master list so the team
-  /// only adds what's new.
-  Future<void> _loadEquipment() async {
+  static const _toolsKey = '';
+
+  /// Tools first, then the selected vehicles in the carousel's name order.
+  List<String> get _equipmentListKeys => [
+    _toolsKey,
+    for (final vehicle in _vehicles)
+      if (_selectedVehicleIds.contains(vehicle.id)) vehicle.id,
+  ];
+
+  Vehicle? _vehicleById(String id) {
+    for (final vehicle in _vehicles) {
+      if (vehicle.id == id) return vehicle;
+    }
+    return null;
+  }
+
+  String _listName(String key) =>
+      key == _toolsKey ? 'Tools' : (_vehicleById(key)?.name ?? 'Vehicle');
+
+  /// Only items with something to pack go on the packing check.
+  static bool _isPackable(EquipmentTemplateItem item) =>
+      (item.quantity ?? 0) + (item.spares ?? 0) > 0;
+
+  List<EquipmentTemplateItem> _packableItems(String key) => [
+    for (final item in _equipmentLists[key] ?? const <EquipmentTemplateItem>[])
+      if (_isPackable(item)) item,
+  ];
+
+  /// (Re)loads Tools and the selected vehicles' lists from the database.
+  Future<void> _loadEquipmentLists() async {
+    setState(() => _loadingEquipment = true);
     try {
-      final items = await widget.database.preFieldDao.getActiveEquipmentList();
-      _log.d('loaded ${items.length} equipment items');
+      final dao = widget.database.equipmentDao;
+      final lists = <String, List<EquipmentTemplateItem>>{
+        for (final key in _equipmentListKeys)
+          key: await dao.getTemplateItems(
+            vehicleId: key == _toolsKey ? null : key,
+          ),
+      };
+      _log.d(
+        'loaded equipment lists: '
+        '${lists.entries.map((e) => '${_listName(e.key)}=${e.value.length}').join(', ')}',
+      );
       if (!mounted) return;
+      final knownIds = {
+        for (final items in lists.values)
+          for (final item in items) item.id,
+      };
       setState(() {
-        _equipmentRows.addAll([
-          for (final item in items)
-            _EquipmentRow(name: item.name, equipmentId: item.id),
-        ]);
-        if (_equipmentRows.isEmpty) _equipmentRows.add(_EquipmentRow());
+        _equipmentLists = lists;
+        _packedItemIds = _packedItemIds.intersection(knownIds);
         _loadingEquipment = false;
       });
     } catch (error, stackTrace) {
-      _log.e('load equipment failed', error, stackTrace);
+      _log.e('load equipment lists failed', error, stackTrace);
       if (!mounted) return;
-      setState(() {
-        if (_equipmentRows.isEmpty) _equipmentRows.add(_EquipmentRow());
-        _loadingEquipment = false;
-      });
+      setState(() => _loadingEquipment = false);
+      _showSnack(error.toString());
     }
   }
 
@@ -402,13 +460,9 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     _log.d('next: step $_step -> ${_step + 1}');
     FocusScope.of(context).unfocus();
     setState(() => _step++);
+    // Vehicles may have changed on step 1: show their lists.
+    if (_step == 1) _loadEquipmentLists();
   }
-
-  /// Equipment rows that have an item name (blank rows are ignored).
-  List<_EquipmentRow> get _filledEquipment => [
-    for (final row in _equipmentRows)
-      if (row.name.text.trim().isNotEmpty) row,
-  ];
 
   Widget _buildDetailsStep() {
     return Column(
@@ -529,15 +583,19 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           },
         ),
         const SizedBox(height: 16),
-        _VehicleChecklistSection(
-          icon: Icons.flight_takeoff_outlined,
-          title: 'Vehicles taken',
+        _VehicleCarouselSection(
           vehicles: _vehicles,
-          selectedVehicleIds: _selectedVehicleIds,
+          selectedIds: _selectedVehicleIds,
           isLoading: _loadingVehicles,
-          onChanged: _toggleVehicle,
-          onOpenType: _openVehicleDetails,
+          onTapVehicle: _onVehicleTapped,
+          onEditVehicle: _editVehicle,
+          onRemoveVehicle: _removeVehicle,
+          onAddVehicle: _addVehicle,
         ),
+        if (_selectedVehicleIds.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _buildPayloadsSection(),
+        ],
         const SizedBox(height: 12),
         _TeamMembersSection(
           icon: Icons.groups_outlined,
@@ -555,125 +613,351 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     );
   }
 
+  Widget _listLeading(String key) {
+    if (key == _toolsKey) {
+      return const Icon(Icons.handyman_outlined, color: AppColors.darkNavy);
+    }
+    final type = _VehicleType.fromDb(_vehicleById(key)?.type ?? '');
+    return type == null
+        ? const Icon(Icons.flight, color: AppColors.darkNavy)
+        : SizedBox.square(
+            dimension: 26,
+            child: Image.asset(type.imageAsset, color: AppColors.darkNavy),
+          );
+  }
+
+  /// Splits an ordered list into (category, items) groups.
+  static List<(String, List<EquipmentTemplateItem>)> _byCategory(
+    List<EquipmentTemplateItem> items,
+  ) {
+    final groups = <(String, List<EquipmentTemplateItem>)>[];
+    for (final item in items) {
+      if (groups.isEmpty || groups.last.$1 != item.category) {
+        groups.add((item.category, []));
+      }
+      groups.last.$2.add(item);
+    }
+    return groups;
+  }
+
   Widget _buildEquipmentStep() {
-    return _SectionShell(
-      icon: Icons.backpack_outlined,
-      title: 'Equipment to bring',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Padding(
-            padding: EdgeInsets.only(bottom: 8),
-            child: Row(
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: Text('Item', style: AppTextStyles.label),
-                ),
-                SizedBox(width: 10),
-                Expanded(
-                  flex: 2,
-                  child: Text('Value', style: AppTextStyles.label),
-                ),
-                SizedBox(width: 48),
-              ],
-            ),
-          ),
-          if (_loadingEquipment) const LinearProgressIndicator(),
-          for (final row in _equipmentRows)
-            Padding(
-              key: ObjectKey(row),
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Row(
-                children: [
-                  Expanded(
-                    flex: 3,
-                    child: TextField(
-                      controller: row.name,
-                      textCapitalization: TextCapitalization.sentences,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        hintText: 'e.g. Batteries',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    flex: 2,
-                    child: TextField(
-                      controller: row.value,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(hintText: 'e.g. 6'),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => setState(() {
-                      _log.d(
-                        'equipment row removed (${_equipmentRows.length - 1} left)',
-                      );
-                      _equipmentRows.remove(row);
-                      row.dispose();
-                    }),
-                    icon: const Icon(Icons.delete_outline),
-                    tooltip: 'Remove item',
-                  ),
-                ],
-              ),
-            ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              onPressed: () => setState(() {
-                _equipmentRows.add(_EquipmentRow());
-                _log.d('equipment row added (${_equipmentRows.length} rows)');
-              }),
-              icon: const Icon(Icons.add),
-              label: const Text('Add item'),
-            ),
-          ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_loadingEquipment) ...[
+          const LinearProgressIndicator(),
+          const SizedBox(height: 12),
         ],
-      ),
+        if (_selectedVehicleIds.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text(
+              'Select vehicles in step 1 to see their checklists.',
+              style: AppTextStyles.secondary,
+            ),
+          ),
+        for (final key in _equipmentListKeys) ...[
+          _EquipmentListCard(
+            leading: _listLeading(key),
+            title: key == _toolsKey ? 'Tools · every session' : _listName(key),
+            subtitle: '${(_equipmentLists[key] ?? const []).length} items',
+            expanded: _expandedLists.contains(key),
+            onToggle: () => setState(() {
+              _expandedLists = _expandedLists.contains(key)
+                  ? ({..._expandedLists}..remove(key))
+                  : {..._expandedLists, key};
+            }),
+            child: _buildTemplateList(key),
+          ),
+          const SizedBox(height: 10),
+        ],
+      ],
     );
   }
 
-  Widget _buildPackingStep() {
-    final items = _filledEquipment;
-    final packed = items.where((row) => row.packed).length;
+  Widget _buildTemplateList(String key) {
+    final items = _equipmentLists[key] ?? const <EquipmentTemplateItem>[];
+    String count(int? value) => value == null ? '–' : '$value';
 
-    return _SectionShell(
-      icon: Icons.checklist_outlined,
-      title: items.isEmpty
-          ? 'Packing check'
-          : 'Packing check ($packed / ${items.length} packed)',
-      child: items.isEmpty
-          ? const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                'No equipment added. Go back a step to add items.',
-                style: AppTextStyles.secondary,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              'No items yet for ${_listName(key)}.',
+              style: AppTextStyles.secondary,
+            ),
+          )
+        else ...[
+          const Row(
+            children: [
+              Expanded(child: Text('Item', style: AppTextStyles.label)),
+              SizedBox(
+                width: 44,
+                child: Text(
+                  'Qty',
+                  textAlign: TextAlign.right,
+                  style: AppTextStyles.label,
+                ),
               ),
-            )
-          : Column(
-              children: [
-                for (final row in items)
-                  CheckboxListTile(
-                    value: row.packed,
-                    onChanged: (value) => setState(() {
-                      row.packed = value ?? false;
-                      _log.d('packed "${row.name.text.trim()}": ${row.packed}');
-                    }),
-                    title: Text(row.name.text.trim()),
-                    secondary: row.value.text.trim().isEmpty
-                        ? null
-                        : Text(
-                            row.value.text.trim(),
-                            style: AppTextStyles.bodyStrong,
-                          ),
-                    contentPadding: EdgeInsets.zero,
-                    controlAffinity: ListTileControlAffinity.leading,
+              SizedBox(
+                width: 56,
+                child: Text(
+                  'Spare',
+                  textAlign: TextAlign.right,
+                  style: AppTextStyles.label,
+                ),
+              ),
+              SizedBox(width: 12),
+            ],
+          ),
+          for (final (category, groupItems) in _byCategory(items)) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 12, bottom: 4),
+              child: Text(
+                category.toUpperCase(),
+                textAlign: TextAlign.center,
+                style: AppTextStyles.equipmentCategory,
+              ),
+            ),
+            for (final item in groupItems)
+              InkWell(
+                onTap: () => _editEquipmentItem(key, item),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          item.name,
+                          style: AppTextStyles.equipmentItem,
+                        ),
+                      ),
+                      SizedBox(
+                        width: 44,
+                        child: Text(
+                          count(item.quantity),
+                          textAlign: TextAlign.right,
+                          style: AppTextStyles.equipmentCount,
+                        ),
+                      ),
+                      SizedBox(
+                        width: 56,
+                        child: Text(
+                          // No spares listed means none: show 0.
+                          '${item.spares ?? 0}',
+                          textAlign: TextAlign.right,
+                          style: AppTextStyles.equipmentCount,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
                   ),
+                ),
+              ),
+          ],
+        ],
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: () => _addEquipmentItem(key),
+            icon: const Icon(Icons.add),
+            label: const Text('Add item'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<String> _categoriesOf(String key) => [
+    for (final (category, _) in _byCategory(_equipmentLists[key] ?? const []))
+      category,
+  ];
+
+  Future<void> _addEquipmentItem(String key) async {
+    final result = await showDialog<_EquipmentItemResult>(
+      context: context,
+      builder: (_) => _EquipmentItemDialog(
+        listName: _listName(key),
+        categories: _categoriesOf(key),
+      ),
+    );
+    if (result == null || !mounted) return;
+
+    await _log.trace('addEquipmentItem', () async {
+      try {
+        final performedBy = await _resolvePerformedBy(
+          widget.database,
+          widget.authCubit.state,
+        );
+        await widget.database.equipmentDao.addTemplateItem(
+          vehicleId: key == _toolsKey ? null : key,
+          category: result.category,
+          name: result.name,
+          quantity: result.quantity,
+          spares: result.spares,
+          performedBy: performedBy,
+        );
+        _log.i('equipment item added to ${_listName(key)}');
+        await _loadEquipmentLists();
+      } catch (error, stackTrace) {
+        _log.e('add equipment item failed', error, stackTrace);
+        _showSnack(error.toString());
+      }
+    });
+  }
+
+  Future<void> _editEquipmentItem(
+    String key,
+    EquipmentTemplateItem item,
+  ) async {
+    final result = await showDialog<_EquipmentItemResult>(
+      context: context,
+      builder: (_) => _EquipmentItemDialog(
+        listName: _listName(key),
+        categories: _categoriesOf(key),
+        item: item,
+      ),
+    );
+    if (result == null || !mounted) return;
+
+    await _log.trace('editEquipmentItem', () async {
+      try {
+        final performedBy = await _resolvePerformedBy(
+          widget.database,
+          widget.authCubit.state,
+        );
+        final dao = widget.database.equipmentDao;
+        if (result.remove) {
+          await dao.deactivateTemplateItem(
+            id: item.id,
+            performedBy: performedBy,
+          );
+          _log.i('equipment item ${item.id} removed');
+        } else {
+          await dao.updateTemplateItem(
+            id: item.id,
+            category: result.category,
+            name: result.name,
+            quantity: result.quantity,
+            spares: result.spares,
+            clearQuantity: result.quantity == null,
+            clearSpares: result.spares == null,
+            performedBy: performedBy,
+          );
+          _log.i('equipment item ${item.id} edited');
+        }
+        await _loadEquipmentLists();
+      } catch (error, stackTrace) {
+        _log.e('edit equipment item failed', error, stackTrace);
+        _showSnack(error.toString());
+      }
+    });
+  }
+
+  void _setPacked(String key, Iterable<String> itemIds, bool packed) {
+    setState(() {
+      _packedItemIds = packed
+          ? {..._packedItemIds, ...itemIds}
+          : ({..._packedItemIds}..removeAll(itemIds));
+      // A fully packed list folds away.
+      final items = _packableItems(key);
+      if (items.isNotEmpty &&
+          items.every((item) => _packedItemIds.contains(item.id))) {
+        _expandedPacking = {..._expandedPacking}..remove(key);
+      }
+    });
+  }
+
+  Widget _buildPackingStep() {
+    final keys = _equipmentListKeys;
+    final all = [for (final key in keys) ..._packableItems(key)];
+    final packed = all.where((item) => _packedItemIds.contains(item.id));
+    final units = all.fold<int>(
+      0,
+      (sum, item) => sum + (item.quantity ?? 0) + (item.spares ?? 0),
+    );
+
+    if (all.isEmpty) {
+      return const Text(
+        'Nothing to pack yet. Go back a step and add quantities.',
+        style: AppTextStyles.secondary,
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DecoratedBox(
+          decoration: AppDecorations.section,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Total: ${packed.length} / ${all.length} items packed · '
+                  '$units units',
+                  style: AppTextStyles.sectionHeader,
+                ),
+                const SizedBox(height: 8),
+                LinearProgressIndicator(value: packed.length / all.length),
               ],
             ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        for (final key in keys)
+          if (_packableItems(key).isNotEmpty) ...[
+            _buildPackingCard(key),
+            const SizedBox(height: 10),
+          ],
+      ],
+    );
+  }
+
+  Widget _buildPackingCard(String key) {
+    final items = _packableItems(key);
+    final packedCount = items
+        .where((item) => _packedItemIds.contains(item.id))
+        .length;
+    final done = packedCount == items.length;
+
+    return _EquipmentListCard(
+      leading: _listLeading(key),
+      title: _listName(key),
+      subtitle: 'packed $packedCount / ${items.length}',
+      done: done,
+      expanded: _expandedPacking.contains(key),
+      onToggle: () => setState(() {
+        _expandedPacking = _expandedPacking.contains(key)
+            ? ({..._expandedPacking}..remove(key))
+            : {..._expandedPacking, key};
+      }),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final (category, groupItems) in _byCategory(items)) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 2),
+              child: Text(
+                category.toUpperCase(),
+                textAlign: TextAlign.center,
+                style: AppTextStyles.equipmentCategory,
+              ),
+            ),
+            for (final item in groupItems)
+              _PackingRow(
+                item: item,
+                packed: _packedItemIds.contains(item.id),
+                onChanged: (value) => _setPacked(key, [item.id], value),
+              ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -689,11 +973,14 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     final vehicles = [
       for (final vehicle in _vehicles)
         if (_selectedVehicleIds.contains(vehicle.id))
-          '${vehicle.name} (${_VehicleType.fromDb(vehicle.type)?.label ?? vehicle.type})',
+          '${vehicle.name} '
+              '(${_VehicleType.fromDb(vehicle.type)?.label ?? vehicle.type})',
     ];
     final crew = [for (final id in _crewUserIds) userName(id)];
-    final items = _filledEquipment;
-    final packed = items.where((row) => row.packed).length;
+    final equipmentKeys = [
+      for (final key in _equipmentListKeys)
+        if (_packableItems(key).isNotEmpty) key,
+    ];
 
     Widget line(String label, String value) => Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -736,6 +1023,16 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           child: Column(
             children: [
               line('Vehicles', vehicles.isEmpty ? '—' : vehicles.join('\n')),
+              line(
+                'Payloads',
+                _selectedPayloadIds.isEmpty
+                    ? '—'
+                    : [
+                        for (final payload in _payloads)
+                          if (_selectedPayloadIds.contains(payload.payloadId))
+                            payload.name,
+                      ].join('\n'),
+              ),
               line('PIC', userName(_picUserId)),
               line('VO', userName(_voUserId)),
               line('Crew', crew.isEmpty ? '—' : crew.join(', ')),
@@ -745,27 +1042,90 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         const SizedBox(height: 12),
         _SectionShell(
           icon: Icons.backpack_outlined,
-          title: items.isEmpty
-              ? 'Equipment'
-              : 'Equipment ($packed / ${items.length} packed)',
-          child: items.isEmpty
+          title: 'Equipment',
+          child: equipmentKeys.isEmpty
               ? const Text(
-                  'No equipment added.',
+                  'No equipment to pack.',
                   style: AppTextStyles.secondary,
                 )
               : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    for (final row in items)
-                      line(
-                        row.packed ? '✓ Packed' : '✗ Not packed',
-                        row.value.text.trim().isEmpty
-                            ? row.name.text.trim()
-                            : '${row.name.text.trim()} — ${row.value.text.trim()}',
-                      ),
+                    // One collapsible card per list (Tools, then vehicles)
+                    // with what's still not packed.
+                    for (final key in equipmentKeys) ...[
+                      _buildReviewEquipmentCard(key),
+                      if (key != equipmentKeys.last) const SizedBox(height: 8),
+                    ],
                   ],
                 ),
         ),
       ],
+    );
+  }
+
+  Widget _buildReviewEquipmentCard(String key) {
+    final items = _packableItems(key);
+    final notPacked = [
+      for (final item in items)
+        if (!_packedItemIds.contains(item.id)) item,
+    ];
+    final packedCount = items.length - notPacked.length;
+
+    return _EquipmentListCard(
+      leading: _listLeading(key),
+      title: _listName(key),
+      subtitle: notPacked.isEmpty
+          ? 'packed $packedCount / ${items.length}'
+          : 'packed $packedCount / ${items.length} · '
+                '${notPacked.length} not packed',
+      done: notPacked.isEmpty,
+      expanded: _expandedReview.contains(key),
+      onToggle: () => setState(() {
+        _expandedReview = _expandedReview.contains(key)
+            ? ({..._expandedReview}..remove(key))
+            : {..._expandedReview, key};
+      }),
+      child: notPacked.isEmpty
+          ? const Text('Everything packed.', style: AppTextStyles.secondary)
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Not packed', style: AppTextStyles.label),
+                const SizedBox(height: 4),
+                for (final (category, groupItems) in _byCategory(
+                  notPacked,
+                )) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 2),
+                    child: Text(
+                      category.toUpperCase(),
+                      textAlign: TextAlign.center,
+                      style: AppTextStyles.equipmentCategory,
+                    ),
+                  ),
+                  for (final item in groupItems)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              item.name,
+                              style: AppTextStyles.notPackedItem,
+                            ),
+                          ),
+                          Text(
+                            _packLabel(item),
+                            style: AppTextStyles.notPackedCount,
+                          ),
+                          const SizedBox(width: 12),
+                        ],
+                      ),
+                    ),
+                ],
+              ],
+            ),
     );
   }
 
@@ -812,6 +1172,12 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           );
         }
         _log.d('added ${_selectedVehicleIds.length} vehicles');
+
+        await _saveVehiclePayloads(
+          database: database,
+          sessionId: sessionId,
+          performedBy: createdBy,
+        );
 
         final teamMembers = <({String userId, String role})>[
           if (_picUserId != null) (userId: _picUserId!, role: 'PIC'),
@@ -867,48 +1233,55 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     });
   }
 
-  /// Saves each equipment row as a session check: the item (reusing a saved
-  /// item with the same name), its value in the check's notes, and whether
-  /// it was ticked as packed.
+  /// Stores the session's equipment snapshot: every item that's on the
+  /// packing check, with whether it was ticked (FR-PFT-09).
   Future<void> _saveEquipment({
     required AppDatabase database,
     required String sessionId,
     required String performedBy,
   }) async {
     await _log.trace('saveEquipment', () async {
-      final dao = database.preFieldDao;
-      final known = {
-        for (final item in await dao.getActiveEquipmentList())
-          item.name.trim().toLowerCase(): item.id,
+      final dao = database.equipmentDao;
+      final sessionVehicleIds = {
+        for (final row in await database.preFieldDao.getSessionVehicles(
+          sessionId,
+        ))
+          row.vehicle.id: row.sessionVehicle.id,
       };
 
-      final rows = _filledEquipment;
-      var created = 0;
-      for (final row in rows) {
-        final name = row.name.text.trim();
-        final value = row.value.text.trim();
-        final existingId = known[name.toLowerCase()];
-        if (existingId == null) created++;
-        final equipmentId =
-            existingId ??
-            await dao.createEquipmentItem(
-              name: name,
-              category: 'General',
-              performedBy: performedBy,
+      final drafts = <SessionEquipmentDraft>[];
+      for (final key in _equipmentListKeys) {
+        final sessionVehicleId = key == _toolsKey
+            ? null
+            : sessionVehicleIds[key];
+        if (key != _toolsKey && sessionVehicleId == null) continue;
+        // Save on step 1 happens before the lists were opened: load them.
+        final items =
+            _equipmentLists[key] ??
+            await dao.getTemplateItems(
+              vehicleId: key == _toolsKey ? null : key,
             );
-        known[name.toLowerCase()] = equipmentId;
-
-        await dao.addCustomEquipmentCheckToSession(
-          sessionId: sessionId,
-          equipmentId: equipmentId,
-          isPacked: row.packed,
-          notes: value.isEmpty ? null : value,
-          checkedBy: performedBy,
-        );
+        for (final item in items.where(_isPackable)) {
+          drafts.add(
+            SessionEquipmentDraft(
+              sessionVehicleId: sessionVehicleId,
+              templateItemId: item.id,
+              category: item.category,
+              name: item.name,
+              quantity: item.quantity,
+              spares: item.spares,
+              isPacked: _packedItemIds.contains(item.id),
+              categoryOrder: item.categoryOrder,
+              sortOrder: item.sortOrder,
+            ),
+          );
+        }
       }
-      _log.d(
-        'saved ${rows.length} equipment checks '
-        '(${rows.where((r) => r.packed).length} packed, $created new items)',
+
+      await dao.saveSessionEquipment(
+        sessionId: sessionId,
+        items: drafts,
+        performedBy: performedBy,
       );
     });
   }
@@ -938,9 +1311,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     final database = widget.database;
 
     try {
-      final users = await (database.select(
-        database.users,
-      )..orderBy([(row) => OrderingTerm.asc(row.name)])).get();
+      final users = await database.preFieldDao.getSelectableUsers();
       _log.d('loaded ${users.length} users');
       if (!mounted) return;
       setState(() {
@@ -1087,16 +1458,300 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     );
   }
 
-  void _toggleVehicle(String vehicleId, bool isSelected) {
-    _log.d('vehicle $vehicleId ${isSelected ? 'selected' : 'removed'}');
+  /// First tap takes the vehicle (asks how many); tapping a selected
+  /// vehicle removes it.
+  Future<void> _onVehicleTapped(Vehicle vehicle) async {
+    if (_selectedVehicleIds.contains(vehicle.id)) {
+      _removeVehicle(vehicle);
+      return;
+    }
+    _log.d('vehicle ${vehicle.id} selected');
     setState(() {
-      final selected = {..._selectedVehicleIds};
-      if (isSelected) {
-        selected.add(vehicleId);
-      } else {
-        selected.remove(vehicleId);
+      _selectedVehicleIds = {..._selectedVehicleIds, vehicle.id};
+    });
+  }
+
+  Future<void> _loadPayloads() async {
+    try {
+      final dao = widget.database.payloadDao;
+      final payloads = [
+        for (final payload in await dao.getAllPayloads())
+          if (payload.status == 'ACTIVE') payload,
+      ];
+      final types = {
+        for (final payload in payloads)
+          payload.payloadId: {
+            for (final type in await dao.getCompatibleVehicleTypes(
+              payload.payloadId,
+            ))
+              type.trim().toUpperCase(),
+          },
+      };
+      final limits = <String, Set<String>>{};
+      for (final payload in payloads) {
+        final vehicleIds = await dao.getLimitedVehicleIds(payload.payloadId);
+        if (vehicleIds.isNotEmpty) limits[payload.payloadId] = {...vehicleIds};
       }
-      _selectedVehicleIds = selected;
+      _log.d(
+        'loaded ${payloads.length} payloads (${limits.length} vehicle-limited)',
+      );
+      if (!mounted) return;
+      setState(() {
+        _payloads = payloads;
+        _payloadTypes = types;
+        _payloadVehicleLimits = limits;
+      });
+    } catch (error, stackTrace) {
+      _log.e('load payloads failed', error, stackTrace);
+    }
+  }
+
+  /// Payloads [vehicle] can carry: a payload limited to specific vehicles
+  /// fits only those; otherwise it fits by vehicle type (no type rows = any).
+  List<Payload> _payloadsFor(Vehicle vehicle) {
+    final type = vehicle.type.trim().toUpperCase();
+    bool fits(Payload payload) {
+      final limit = _payloadVehicleLimits[payload.payloadId];
+      if (limit != null) return limit.contains(vehicle.id);
+      final types = _payloadTypes[payload.payloadId] ?? const <String>{};
+      return types.isEmpty || types.contains(type);
+    }
+
+    return [
+      for (final payload in _payloads)
+        if (fits(payload)) payload,
+    ];
+  }
+
+  /// Payloads that fit at least one selected vehicle, each listed once.
+  List<Payload> get _payloadOptions {
+    final selected = _selectedVehicles;
+    return [
+      for (final payload in _payloads)
+        if (selected.any((vehicle) => _payloadsFor(vehicle).contains(payload)))
+          payload,
+    ];
+  }
+
+  List<Vehicle> get _selectedVehicles => [
+    for (final vehicle in _vehicles)
+      if (_selectedVehicleIds.contains(vehicle.id)) vehicle,
+  ];
+
+  void _togglePayload(Payload payload, bool selected) {
+    _log.d('payload ${payload.payloadId} ${selected ? 'selected' : 'removed'}');
+    setState(() {
+      _selectedPayloadIds = selected
+          ? {..._selectedPayloadIds, payload.payloadId}
+          : ({..._selectedPayloadIds}..remove(payload.payloadId));
+    });
+  }
+
+  /// Payloads for all selected vehicles together: one chip per payload.
+  Widget _buildPayloadsSection() {
+    final options = _payloadOptions;
+
+    return _SectionShell(
+      icon: Icons.camera_alt_outlined,
+      title: _selectedPayloadIds.isEmpty
+          ? 'Payloads'
+          : 'Payloads (${_selectedPayloadIds.length})',
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (options.isEmpty)
+            const Text(
+              'No compatible payloads.',
+              style: AppTextStyles.secondary,
+            ),
+          for (final payload in options)
+            FilterChip(
+              label: Text(payload.name),
+              tooltip: payload.category,
+              selected: _selectedPayloadIds.contains(payload.payloadId),
+              onSelected: (value) => _togglePayload(payload, value),
+            ),
+          ActionChip(
+            avatar: const Icon(Icons.add, size: 18),
+            label: const Text('New payload'),
+            onPressed: _addPayload,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Creates a payload (saved to the payload list for future sessions too)
+  /// and selects it.
+  Future<void> _addPayload() async {
+    final draft = await showDialog<_NewPayloadDraft>(
+      context: context,
+      builder: (_) => _NewPayloadDialog(
+        // Default to the types of the vehicles selected now.
+        initialTypes: {
+          for (final vehicle in _selectedVehicles)
+            vehicle.type.trim().toUpperCase(),
+        },
+      ),
+    );
+    if (draft == null || !mounted) return;
+
+    await _log.trace('addPayload', () async {
+      try {
+        final performedBy = await _resolvePerformedBy(
+          widget.database,
+          widget.authCubit.state,
+        );
+        final payloadId = await widget.database.payloadDao.createPayload(
+          name: draft.name,
+          category: draft.category,
+          storageType: draft.storageType,
+          storageCapacity: draft.storageCapacity,
+          compatibleVehicleTypes: draft.vehicleTypes.toList(),
+          performedBy: performedBy,
+        );
+        _log.i('payload created $payloadId');
+        await _loadPayloads();
+        if (!mounted) return;
+        // Select it if it fits a selected vehicle.
+        if (_payloadOptions.any((p) => p.payloadId == payloadId)) {
+          setState(() {
+            _selectedPayloadIds = {..._selectedPayloadIds, payloadId};
+          });
+        }
+      } catch (error, stackTrace) {
+        _log.e('add payload failed', error, stackTrace);
+        _showSnack(error.toString());
+      }
+    });
+  }
+
+  /// Links each chosen payload to every session vehicle it fits (FR-PFT-06).
+  Future<void> _saveVehiclePayloads({
+    required AppDatabase database,
+    required String sessionId,
+    required String performedBy,
+  }) async {
+    if (_selectedPayloadIds.isEmpty) return;
+
+    final dao = database.preFieldDao;
+    var count = 0;
+    for (final row in await dao.getSessionVehicles(sessionId)) {
+      for (final payload in _payloadsFor(row.vehicle)) {
+        if (!_selectedPayloadIds.contains(payload.payloadId)) continue;
+        await dao.addPayloadToSessionVehicle(
+          sessionVehicleId: row.sessionVehicle.id,
+          payloadId: payload.payloadId,
+          performedBy: performedBy,
+        );
+        count++;
+      }
+    }
+    _log.d('saved $count vehicle payload links');
+  }
+
+  void _removeVehicle(Vehicle vehicle) {
+    _log.d('vehicle ${vehicle.id} removed');
+    setState(() {
+      _selectedVehicleIds = {..._selectedVehicleIds}..remove(vehicle.id);
+      // Drop payloads that no longer fit any selected vehicle.
+      final stillFitting = {
+        for (final payload in _payloadOptions) payload.payloadId,
+      };
+      _selectedPayloadIds = _selectedPayloadIds.intersection(stillFitting);
+    });
+  }
+
+  Future<void> _editVehicle(Vehicle vehicle) async {
+    final draft = await showDialog<_NewVehicleDraft>(
+      context: context,
+      builder: (_) => _VehicleDetailsDialog(vehicle: vehicle),
+    );
+    if (draft == null || !mounted || !_detailsChanged(vehicle, draft)) return;
+
+    await _log.trace('editVehicle', () async {
+      try {
+        final performedBy = await _resolvePerformedBy(
+          widget.database,
+          widget.authCubit.state,
+        );
+        // updateVehicle treats null as "unchanged", so a cleared text field
+        // is written as '' to actually clear it.
+        String? edited(String? before, String? after) =>
+            after ?? (before == null ? null : '');
+        await widget.database.vehicleDao.updateVehicle(
+          vehicleId: vehicle.id,
+          name: draft.name,
+          type: draft.type.dbValue,
+          frameMake: edited(vehicle.frameMake, draft.frameMake),
+          frameModel: edited(vehicle.frameModel, draft.frameModel),
+          // null keeps the old count (an int can't be cleared to '').
+          motorCount: draft.motorCount,
+          frameStyle: edited(vehicle.frameStyle, draft.frameStyle),
+          firmwareTarget: edited(vehicle.firmwareTarget, draft.firmwareTarget),
+          defaultFailSafeProfile: edited(
+            vehicle.defaultFailSafeProfile,
+            draft.defaultFailSafeProfile,
+          ),
+          notes: edited(vehicle.notes, draft.notes),
+          performedBy: performedBy,
+        );
+        _log.i('vehicle ${vehicle.id} edited');
+        await _loadVehicles();
+      } catch (error, stackTrace) {
+        _log.e('edit vehicle failed', error, stackTrace);
+        _showSnack(error.toString());
+      }
+    });
+  }
+
+  Future<void> _addVehicle() async {
+    final draft = await showDialog<_NewVehicleDraft>(
+      context: context,
+      builder: (_) => const _VehicleDetailsDialog(),
+    );
+    if (draft == null || !mounted) return;
+
+    await _log.trace('addVehicle', () async {
+      try {
+        final performedBy = await _resolvePerformedBy(
+          widget.database,
+          widget.authCubit.state,
+        );
+        final vehicleId = await widget.database.vehicleDao
+            .createVehicleWithChecklist(
+              name: draft.name,
+              type: draft.type.dbValue,
+              frameMake: draft.frameMake,
+              frameModel: draft.frameModel,
+              motorCount: draft.motorCount,
+              frameStyle: draft.frameStyle,
+              firmwareTarget: draft.firmwareTarget,
+              defaultFailSafeProfile: draft.defaultFailSafeProfile,
+              notes: draft.notes,
+              createdByUserId: performedBy,
+              checklistItems: const [
+                ChecklistItemDraft(
+                  section: 'General',
+                  label: 'Visual inspection complete',
+                  responseType: 'PASS_FAIL_NA',
+                ),
+              ],
+            );
+        _log.i('vehicle created $vehicleId (${draft.type.dbValue})');
+        await _loadVehicles();
+        if (!mounted) return;
+
+        // A vehicle added here is meant to be taken: select it.
+        setState(() {
+          _selectedVehicleIds = {..._selectedVehicleIds, vehicleId};
+        });
+      } catch (error, stackTrace) {
+        _log.e('add vehicle failed', error, stackTrace);
+        _showSnack(error.toString());
+      }
     });
   }
 
@@ -1194,127 +1849,6 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     });
   }
 
-  /// One vehicle per type per session: saving a type's dialog replaces any
-  /// vehicle previously picked for that type.
-  Future<void> _openVehicleDetails(_VehicleType type) async {
-    _log.d('vehicle type tapped: ${type.dbValue}');
-    await _log.trace('openVehicleDetails', () async {
-      final database = widget.database;
-      final authState = widget.authCubit.state;
-      final vehiclesOfType = [
-        for (final vehicle in _vehicles)
-          if (_VehicleType.fromDb(vehicle.type) == type) vehicle,
-      ];
-      final typeIds = {for (final vehicle in vehiclesOfType) vehicle.id};
-      Vehicle? current;
-      for (final vehicle in vehiclesOfType) {
-        if (_selectedVehicleIds.contains(vehicle.id)) current = vehicle;
-      }
-
-      final result = await showDialog<_VehicleDetailsResult>(
-        context: context,
-        builder: (_) => _VehicleDetailsDialog(
-          type: type,
-          savedVehicles: vehiclesOfType,
-          currentVehicle: current,
-        ),
-      );
-
-      if (result == null || !mounted) {
-        _log.d('vehicle dialog cancelled: ${type.dbValue}');
-        return;
-      }
-
-      if (result.remove) {
-        _log.d('vehicle dialog: removed ${type.dbValue}');
-        setState(() {
-          _selectedVehicleIds = _selectedVehicleIds.difference(typeIds);
-        });
-        return;
-      }
-
-      final draft = result.details!;
-      try {
-        final performedBy = await _resolvePerformedBy(database, authState);
-        var vehicleId = result.vehicleId;
-
-        if (vehicleId == null) {
-          _log.d('vehicle dialog: adding new ${draft.type.dbValue}');
-          vehicleId = await database.vehicleDao.createVehicleWithChecklist(
-            name: draft.name,
-            type: draft.type.dbValue,
-            frameMake: draft.frameMake,
-            frameModel: draft.frameModel,
-            motorCount: draft.motorCount,
-            frameStyle: draft.frameStyle,
-            firmwareTarget: draft.firmwareTarget,
-            defaultFailSafeProfile: draft.defaultFailSafeProfile,
-            notes: draft.notes,
-            createdByUserId: performedBy,
-            checklistItems: const [
-              ChecklistItemDraft(
-                section: 'General',
-                label: 'Visual inspection complete',
-                responseType: 'PASS_FAIL_NA',
-              ),
-            ],
-          );
-          _log.i('vehicle added $vehicleId (${draft.type.dbValue})');
-        } else {
-          final original = vehiclesOfType.firstWhere((v) => v.id == vehicleId);
-          if (_detailsChanged(original, draft)) {
-            _log.d(
-              'vehicle dialog: editing $vehicleId (${draft.type.dbValue})',
-            );
-            // updateVehicle treats null as "unchanged", so a cleared text
-            // field is written as '' to actually clear it.
-            String? edited(String? before, String? after) =>
-                after ?? (before == null ? null : '');
-            await database.vehicleDao.updateVehicle(
-              vehicleId: vehicleId,
-              name: draft.name,
-              frameMake: edited(original.frameMake, draft.frameMake),
-              frameModel: edited(original.frameModel, draft.frameModel),
-              motorCount: draft.motorCount,
-              frameStyle: edited(original.frameStyle, draft.frameStyle),
-              firmwareTarget: edited(
-                original.firmwareTarget,
-                draft.firmwareTarget,
-              ),
-              defaultFailSafeProfile: edited(
-                original.defaultFailSafeProfile,
-                draft.defaultFailSafeProfile,
-              ),
-              notes: edited(original.notes, draft.notes),
-              performedBy: performedBy,
-            );
-            _log.i('vehicle edited $vehicleId (${draft.type.dbValue})');
-          } else {
-            _log.d(
-              'vehicle picked $vehicleId (${draft.type.dbValue}), unchanged',
-            );
-          }
-        }
-
-        if (!mounted) return;
-        await _loadVehicles();
-        if (!mounted) return;
-        setState(() {
-          _selectedVehicleIds = {
-            ..._selectedVehicleIds.difference(typeIds),
-            vehicleId!,
-          };
-        });
-      } catch (error, stackTrace) {
-        _log.e('save vehicle details failed', error, stackTrace);
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(error.toString())));
-      }
-    });
-  }
-
   bool _detailsChanged(Vehicle vehicle, _NewVehicleDraft draft) {
     String? norm(String? value) =>
         (value == null || value.trim().isEmpty) ? null : value.trim();
@@ -1322,6 +1856,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         norm(vehicle.frameMake) != draft.frameMake ||
         norm(vehicle.frameModel) != draft.frameModel ||
         vehicle.motorCount != draft.motorCount ||
+        vehicle.type != draft.type.dbValue ||
         norm(vehicle.frameStyle) != draft.frameStyle ||
         norm(vehicle.firmwareTarget) != draft.firmwareTarget ||
         norm(vehicle.defaultFailSafeProfile) != draft.defaultFailSafeProfile ||
@@ -1429,24 +1964,559 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   }
 }
 
-class _EquipmentRow {
-  final TextEditingController name;
-  final TextEditingController value;
-  final String? equipmentId;
-  bool packed = false;
+/// "4", or "4 + 4 spare".
+String _packLabel(EquipmentTemplateItem item) {
+  final quantity = item.quantity ?? 0;
+  final spares = item.spares ?? 0;
+  if (spares == 0) return '$quantity';
+  if (quantity == 0) return '$spares spare';
+  return '$quantity + $spares spare';
+}
 
-  _EquipmentRow({String name = '', String value = '', this.equipmentId})
-    : name = TextEditingController(text: name),
-      value = TextEditingController(text: value);
+class _NewPayloadDraft {
+  final String name;
+  final String category;
+  final String? storageType;
+  final String? storageCapacity;
+  final Set<String> vehicleTypes;
 
+  const _NewPayloadDraft({
+    required this.name,
+    required this.category,
+    required this.storageType,
+    required this.storageCapacity,
+    required this.vehicleTypes,
+  });
+}
+
+/// Add a payload: name, category, storage, and which vehicle types it fits.
+class _NewPayloadDialog extends StatefulWidget {
+  final Set<String> initialTypes;
+
+  const _NewPayloadDialog({required this.initialTypes});
+
+  @override
+  State<_NewPayloadDialog> createState() => _NewPayloadDialogState();
+}
+
+class _NewPayloadDialogState extends State<_NewPayloadDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _categoryController = TextEditingController();
+  final _storageTypeController = TextEditingController();
+  final _storageCapacityController = TextEditingController();
+  late Set<String> _types = widget.initialTypes.isEmpty
+      ? {for (final type in _VehicleType.values) type.dbValue}
+      : {...widget.initialTypes};
+  bool _showTypeError = false;
+
+  @override
   void dispose() {
-    name.dispose();
-    value.dispose();
+    _nameController.dispose();
+    _categoryController.dispose();
+    _storageTypeController.dispose();
+    _storageCapacityController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          const Expanded(child: Text('New payload')),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close),
+            tooltip: 'Close',
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 420,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.only(top: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextFormField(
+                  controller: _nameController,
+                  autofocus: true,
+                  textCapitalization: TextCapitalization.words,
+                  validator: (value) => (value == null || value.trim().isEmpty)
+                      ? 'Enter a payload name'
+                      : null,
+                  decoration: AppDecorations.field(
+                    label: 'Payload name',
+                    icon: Icons.camera_alt_outlined,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: _categoryController,
+                  textCapitalization: TextCapitalization.words,
+                  validator: (value) => (value == null || value.trim().isEmpty)
+                      ? 'Enter a category'
+                      : null,
+                  decoration: AppDecorations.field(
+                    label: 'Category (e.g. RGB Camera, Thermal)',
+                    icon: Icons.category_outlined,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: _storageTypeController,
+                  decoration: AppDecorations.field(
+                    label: 'Storage (e.g. SD card)',
+                    icon: Icons.sd_storage_outlined,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: _storageCapacityController,
+                  decoration: AppDecorations.field(
+                    label: 'Storage capacity (e.g. 64GB)',
+                    icon: Icons.storage_outlined,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text('Fits vehicle types', style: AppTextStyles.label),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final type in _VehicleType.values)
+                      FilterChip(
+                        label: Text(type.label),
+                        selected: _types.contains(type.dbValue),
+                        onSelected: (value) => setState(() {
+                          _types = value
+                              ? {..._types, type.dbValue}
+                              : ({..._types}..remove(type.dbValue));
+                          _showTypeError = false;
+                        }),
+                      ),
+                  ],
+                ),
+                if (_showTypeError)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text(
+                      'Pick at least one vehicle type.',
+                      style: AppTextStyles.error,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [FilledButton(onPressed: _submit, child: const Text('Add'))],
+    );
+  }
+
+  void _submit() {
+    final formValid = _formKey.currentState?.validate() ?? false;
+    if (_types.isEmpty) setState(() => _showTypeError = true);
+    if (!formValid || _types.isEmpty) return;
+
+    String? blankToNull(String text) =>
+        text.trim().isEmpty ? null : text.trim();
+    Navigator.of(context).pop(
+      _NewPayloadDraft(
+        name: _nameController.text.trim(),
+        category: _categoryController.text.trim(),
+        storageType: blankToNull(_storageTypeController.text),
+        storageCapacity: blankToNull(_storageCapacityController.text),
+        vehicleTypes: _types,
+      ),
+    );
   }
 }
 
-/// Numbered step indicator: done steps are filled with a tick, the current
-/// step is filled with its number, upcoming steps are outlined.
+/// Collapsible card for one equipment list (Tools or a vehicle).
+class _EquipmentListCard extends StatelessWidget {
+  final Widget leading;
+  final String title;
+  final String subtitle;
+  final bool expanded;
+  final bool done;
+  final VoidCallback onToggle;
+  final Widget child;
+
+  const _EquipmentListCard({
+    required this.leading,
+    required this.title,
+    required this.subtitle,
+    required this.expanded,
+    required this.onToggle,
+    required this.child,
+    this.done = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: AppDecorations.section,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: onToggle,
+            borderRadius: const BorderRadius.all(
+              Radius.circular(AppSizes.panelRadius),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              child: Row(
+                children: [
+                  leading,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, style: AppTextStyles.sectionHeader),
+                        Text(subtitle, style: AppTextStyles.caption),
+                      ],
+                    ),
+                  ),
+                  if (done)
+                    const Padding(
+                      padding: EdgeInsets.only(right: 4),
+                      child: Icon(
+                        Icons.check_circle,
+                        color: AppColors.deepBlue,
+                      ),
+                    ),
+                  Icon(expanded ? Icons.expand_less : Icons.expand_more),
+                ],
+              ),
+            ),
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 4, 12),
+              child: child,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One tickable line on the packing check, with a large count.
+class _PackingRow extends StatelessWidget {
+  final EquipmentTemplateItem item;
+  final bool packed;
+  final ValueChanged<bool> onChanged;
+
+  const _PackingRow({
+    required this.item,
+    required this.packed,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final units = (item.quantity ?? 0) + (item.spares ?? 0);
+    return InkWell(
+      onTap: () => onChanged(!packed),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Checkbox(
+              value: packed,
+              onChanged: (value) => onChanged(value ?? false),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(item.name, style: AppTextStyles.equipmentItem),
+                  if ((item.spares ?? 0) > 0)
+                    Text('$units units', style: AppTextStyles.caption),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(_packLabel(item), style: AppTextStyles.packingCount),
+            const SizedBox(width: 8),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EquipmentItemResult {
+  final String category;
+  final String name;
+  final int? quantity;
+  final int? spares;
+  final bool remove;
+
+  const _EquipmentItemResult({
+    required this.category,
+    required this.name,
+    required this.quantity,
+    required this.spares,
+    this.remove = false,
+  });
+}
+
+/// Add / edit an equipment item: category, name, quantity, spares.
+class _EquipmentItemDialog extends StatefulWidget {
+  final String listName;
+  final List<String> categories;
+
+  /// Item being edited; null adds a new one.
+  final EquipmentTemplateItem? item;
+
+  const _EquipmentItemDialog({
+    required this.listName,
+    required this.categories,
+    this.item,
+  });
+
+  @override
+  State<_EquipmentItemDialog> createState() => _EquipmentItemDialogState();
+}
+
+class _EquipmentItemDialogState extends State<_EquipmentItemDialog> {
+  static const _newCategory = '__new__';
+  static const _suggestions = [
+    'Airframe',
+    'Subsystems',
+    'Communication Systems',
+    'Power Systems',
+  ];
+
+  final _formKey = GlobalKey<FormState>();
+  late final _nameController = TextEditingController(
+    text: widget.item?.name ?? '',
+  );
+  late final _quantityController = TextEditingController(
+    text: widget.item?.quantity?.toString() ?? '',
+  );
+  late final _sparesController = TextEditingController(
+    text: widget.item?.spares?.toString() ?? '',
+  );
+  final _newCategoryController = TextEditingController();
+
+  late String _category =
+      widget.item?.category ??
+      (widget.categories.isNotEmpty ? widget.categories.first : _newCategory);
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _quantityController.dispose();
+    _sparesController.dispose();
+    _newCategoryController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isNew = widget.item == null;
+    final suggestions = [
+      for (final suggestion in _suggestions)
+        if (!widget.categories.contains(suggestion)) suggestion,
+    ];
+
+    return AlertDialog(
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              isNew
+                  ? 'Add item · ${widget.listName}'
+                  : 'Edit ${widget.item!.name}',
+            ),
+          ),
+          IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close),
+            tooltip: 'Close',
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 420,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.only(top: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: _category,
+                  isExpanded: true,
+                  decoration: AppDecorations.field(
+                    label: 'Category',
+                    icon: Icons.folder_outlined,
+                  ),
+                  items: [
+                    for (final category in widget.categories)
+                      DropdownMenuItem(value: category, child: Text(category)),
+                    const DropdownMenuItem(
+                      value: _newCategory,
+                      child: Text('New category…'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setState(() => _category = value);
+                  },
+                ),
+                if (_category == _newCategory) ...[
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _newCategoryController,
+                    textCapitalization: TextCapitalization.words,
+                    validator: (value) =>
+                        (value == null || value.trim().isEmpty)
+                        ? 'Enter a category'
+                        : null,
+                    decoration: AppDecorations.field(
+                      label: 'New category',
+                      icon: Icons.create_new_folder_outlined,
+                    ),
+                  ),
+                  if (suggestions.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final suggestion in suggestions)
+                          ActionChip(
+                            label: Text(suggestion),
+                            onPressed: () => setState(
+                              () => _newCategoryController.text = suggestion,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ],
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: _nameController,
+                  autofocus: isNew,
+                  textCapitalization: TextCapitalization.sentences,
+                  validator: (value) => (value == null || value.trim().isEmpty)
+                      ? 'Enter an item name'
+                      : null,
+                  decoration: AppDecorations.field(
+                    label: 'Item',
+                    icon: Icons.inventory_2_outlined,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _quantityController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        decoration: AppDecorations.field(
+                          label: 'Quantity',
+                          icon: Icons.tag,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _sparesController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        decoration: AppDecorations.field(
+                          label: 'Spares',
+                          icon: Icons.add_box_outlined,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        if (!isNew)
+          TextButton(
+            onPressed: _confirmRemove,
+            style: TextButton.styleFrom(foregroundColor: AppColors.errorRed),
+            child: const Text('Remove from list'),
+          ),
+        FilledButton(onPressed: _submit, child: Text(isNew ? 'Add' : 'Save')),
+      ],
+    );
+  }
+
+  Future<void> _confirmRemove() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove ${widget.item!.name}?'),
+        content: Text(
+          'It will no longer appear on the ${widget.listName} list for new '
+          'sessions. Sessions already saved keep it.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    Navigator.of(context).pop(
+      _EquipmentItemResult(
+        category: widget.item!.category,
+        name: widget.item!.name,
+        quantity: widget.item!.quantity,
+        spares: widget.item!.spares,
+        remove: true,
+      ),
+    );
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final category = _category == _newCategory
+        ? _newCategoryController.text.trim()
+        : _category;
+    Navigator.of(context).pop(
+      _EquipmentItemResult(
+        category: category,
+        name: _nameController.text.trim(),
+        quantity: int.tryParse(_quantityController.text.trim()),
+        spares: int.tryParse(_sparesController.text.trim()),
+      ),
+    );
+  }
+}
+
 class _SessionStepper extends StatelessWidget {
   final int current;
   final int count;
@@ -1537,70 +2607,57 @@ class _DateField extends StatelessWidget {
   }
 }
 
-class _VehicleDetailsResult {
-  /// True when the user removed this type's vehicle from the session.
-  final bool remove;
-
-  /// Saved vehicle being used/edited; null means create a new vehicle.
-  final String? vehicleId;
-
-  final _NewVehicleDraft? details;
-
-  const _VehicleDetailsResult.save({this.vehicleId, required this.details})
-    : remove = false;
-
-  const _VehicleDetailsResult.remove()
-    : remove = true,
-      vehicleId = null,
-      details = null;
-}
-
-/// Pop-up opened by tapping a vehicle type in "Vehicles taken". Pick a saved
-/// vehicle of that type (and edit its details) or enter a new one.
+/// Add / edit a vehicle's details. Returns the entered details, or null on
+/// Cancel.
 class _VehicleDetailsDialog extends StatefulWidget {
-  final _VehicleType type;
-  final List<Vehicle> savedVehicles;
+  /// Vehicle being edited; null adds a new one.
+  final Vehicle? vehicle;
 
-  /// The vehicle already taken for this type in this session, if any.
-  final Vehicle? currentVehicle;
-
-  const _VehicleDetailsDialog({
-    required this.type,
-    required this.savedVehicles,
-    required this.currentVehicle,
-  });
+  const _VehicleDetailsDialog({this.vehicle});
 
   @override
   State<_VehicleDetailsDialog> createState() => _VehicleDetailsDialogState();
 }
 
 class _VehicleDetailsDialogState extends State<_VehicleDetailsDialog> {
-  static const _newVehicle = '__new__';
+  static const _frameModels = ['Fixed', 'Folding'];
 
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _frameMakeController = TextEditingController();
-  final _frameModelController = TextEditingController();
-  final _motorCountController = TextEditingController();
-  final _frameStyleController = TextEditingController();
-  final _firmwareTargetController = TextEditingController();
-  final _failSafeController = TextEditingController();
-  final _notesController = TextEditingController();
+  late final _nameController = TextEditingController(
+    text: widget.vehicle?.name ?? '',
+  );
+  late final _frameMakeController = TextEditingController(
+    text: widget.vehicle?.frameMake ?? '',
+  );
+  late final _motorCountController = TextEditingController(
+    text: widget.vehicle?.motorCount?.toString() ?? '',
+  );
+  late final _frameStyleController = TextEditingController(
+    text: widget.vehicle?.frameStyle ?? '',
+  );
+  late final _firmwareTargetController = TextEditingController(
+    text: widget.vehicle?.firmwareTarget ?? '',
+  );
+  late final _failSafeController = TextEditingController(
+    text: widget.vehicle?.defaultFailSafeProfile ?? '',
+  );
+  late final _notesController = TextEditingController(
+    text: widget.vehicle?.notes ?? '',
+  );
 
-  late String _choice;
+  late _VehicleType _type =
+      _VehicleType.fromDb(widget.vehicle?.type ?? '') ??
+      _VehicleType.multirotor;
+  late String? _frameModel = _blankToNull(widget.vehicle?.frameModel);
+
+  bool get _isNew => widget.vehicle == null;
 
   @override
   void initState() {
     super.initState();
-    final initial =
-        widget.currentVehicle ??
-        (widget.savedVehicles.isEmpty ? null : widget.savedVehicles.first);
-    _choice = initial?.id ?? _newVehicle;
     _dialogLog.t(
-      'initState ${widget.type.dbValue}: '
-      '${widget.savedVehicles.length} saved, initial $_choice',
+      _isNew ? 'opened: add vehicle' : 'opened: edit ${widget.vehicle!.id}',
     );
-    _fill(initial);
   }
 
   @override
@@ -1608,7 +2665,6 @@ class _VehicleDetailsDialogState extends State<_VehicleDetailsDialog> {
     for (final controller in [
       _nameController,
       _frameMakeController,
-      _frameModelController,
       _motorCountController,
       _frameStyleController,
       _firmwareTargetController,
@@ -1620,31 +2676,29 @@ class _VehicleDetailsDialogState extends State<_VehicleDetailsDialog> {
     super.dispose();
   }
 
-  void _fill(Vehicle? vehicle) {
-    _nameController.text = vehicle?.name ?? '';
-    _frameMakeController.text = vehicle?.frameMake ?? '';
-    _frameModelController.text = vehicle?.frameModel ?? '';
-    _motorCountController.text = vehicle?.motorCount?.toString() ?? '';
-    _frameStyleController.text = vehicle?.frameStyle ?? '';
-    _firmwareTargetController.text = vehicle?.firmwareTarget ?? '';
-    _failSafeController.text = vehicle?.defaultFailSafeProfile ?? '';
-    _notesController.text = vehicle?.notes ?? '';
-  }
-
   @override
   Widget build(BuildContext context) {
-    final type = widget.type;
-    final isNew = _choice == _newVehicle;
+    // Keep an older free-text frame model selectable instead of crashing the
+    // dropdown.
+    final frameModels = [
+      ..._frameModels,
+      if (_frameModel != null && !_frameModels.contains(_frameModel))
+        _frameModel!,
+    ];
 
     return AlertDialog(
       title: Row(
         children: [
           SizedBox.square(
             dimension: 28,
-            child: Image.asset(type.imageAsset, color: AppColors.darkNavy),
+            child: Image.asset(_type.imageAsset, color: AppColors.darkNavy),
           ),
           const SizedBox(width: 10),
-          Expanded(child: Text('${type.label} details')),
+          Expanded(
+            child: Text(
+              _isNew ? 'Add vehicle' : 'Edit ${widget.vehicle!.name}',
+            ),
+          ),
         ],
       ),
       content: SizedBox(
@@ -1652,51 +2706,15 @@ class _VehicleDetailsDialogState extends State<_VehicleDetailsDialog> {
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
+            // Room for the first field's floating label, which sits above
+            // its border and would otherwise be clipped.
+            padding: const EdgeInsets.only(top: 8),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (widget.savedVehicles.isNotEmpty) ...[
-                  DropdownButtonFormField<String>(
-                    initialValue: _choice,
-                    isExpanded: true,
-                    decoration: AppDecorations.field(
-                      label: 'Vehicle',
-                      icon: Icons.inventory_2_outlined,
-                    ),
-                    items: [
-                      for (final vehicle in widget.savedVehicles)
-                        DropdownMenuItem(
-                          value: vehicle.id,
-                          child: Text(
-                            vehicle.name,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      DropdownMenuItem(
-                        value: _newVehicle,
-                        child: Text('New ${type.label}'),
-                      ),
-                    ],
-                    onChanged: (value) {
-                      if (value == null) return;
-                      _dialogLog.d('vehicle choice: $value');
-                      setState(() {
-                        _choice = value;
-                        _fill(
-                          value == _newVehicle
-                              ? null
-                              : widget.savedVehicles.firstWhere(
-                                  (v) => v.id == value,
-                                ),
-                        );
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                ],
                 TextFormField(
                   controller: _nameController,
-                  autofocus: widget.savedVehicles.isEmpty,
+                  autofocus: _isNew,
                   textCapitalization: TextCapitalization.words,
                   validator: (value) => (value == null || value.trim().isEmpty)
                       ? 'Enter a vehicle name'
@@ -1707,22 +2725,41 @@ class _VehicleDetailsDialogState extends State<_VehicleDetailsDialog> {
                   ),
                 ),
                 const SizedBox(height: 14),
+                DropdownButtonFormField<_VehicleType>(
+                  initialValue: _type,
+                  decoration: AppDecorations.field(
+                    label: 'Vehicle type',
+                    icon: Icons.category_outlined,
+                  ),
+                  items: [
+                    for (final type in _VehicleType.values)
+                      DropdownMenuItem(value: type, child: Text(type.label)),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setState(() => _type = value);
+                  },
+                ),
+                const SizedBox(height: 14),
                 TextFormField(
                   controller: _frameMakeController,
-                  textCapitalization: TextCapitalization.words,
+                  textCapitalization: TextCapitalization.sentences,
                   decoration: AppDecorations.field(
                     label: 'Frame make',
                     icon: Icons.precision_manufacturing_outlined,
                   ),
                 ),
                 const SizedBox(height: 14),
-                TextFormField(
-                  controller: _frameModelController,
-                  textCapitalization: TextCapitalization.words,
+                DropdownButtonFormField<String>(
+                  initialValue: _frameModel,
                   decoration: AppDecorations.field(
                     label: 'Frame model',
                     icon: Icons.view_in_ar_outlined,
                   ),
+                  items: [
+                    for (final model in frameModels)
+                      DropdownMenuItem(value: model, child: Text(model)),
+                  ],
+                  onChanged: (value) => setState(() => _frameModel = value),
                 ),
                 const SizedBox(height: 14),
                 TextFormField(
@@ -1730,7 +2767,8 @@ class _VehicleDetailsDialogState extends State<_VehicleDetailsDialog> {
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   decoration: AppDecorations.field(
-                    label: 'Motor count',
+                    // Total motors: a 4+1 VTOL (4 lift + 1 pusher) is 5.
+                    label: 'Motor count (total)',
                     icon: Icons.settings_outlined,
                   ),
                 ),
@@ -1775,88 +2813,78 @@ class _VehicleDetailsDialogState extends State<_VehicleDetailsDialog> {
         ),
       ),
       actions: [
-        if (widget.currentVehicle != null)
-          TextButton(
-            onPressed: () {
-              _dialogLog.d('remove tapped: ${widget.type.dbValue}');
-              Navigator.of(context).pop(const _VehicleDetailsResult.remove());
-            },
-            style: TextButton.styleFrom(foregroundColor: AppColors.errorRed),
-            child: const Text('Remove'),
-          ),
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () {
+            _dialogLog.d('cancelled');
+            Navigator.of(context).pop();
+          },
           child: const Text('Cancel'),
         ),
-        FilledButton(onPressed: _submit, child: Text(isNew ? 'Add' : 'Save')),
+        FilledButton(onPressed: _submit, child: Text(_isNew ? 'Add' : 'Save')),
       ],
     );
   }
 
   void _submit() {
     if (!(_formKey.currentState?.validate() ?? false)) {
-      _dialogLog.d('submit: form invalid');
+      _dialogLog.d('submit: invalid form');
       return;
     }
     _dialogLog.d(
-      'submit ${widget.type.dbValue}: '
-      '${_choice == _newVehicle ? 'new vehicle' : 'vehicle $_choice'}',
+      'submit: ${_isNew ? 'new' : widget.vehicle!.id} (${_type.dbValue})',
     );
 
     Navigator.of(context).pop(
-      _VehicleDetailsResult.save(
-        vehicleId: _choice == _newVehicle ? null : _choice,
-        details: _NewVehicleDraft(
-          name: _nameController.text.trim(),
-          type: widget.type,
-          frameMake: _nullableText(_frameMakeController),
-          frameModel: _nullableText(_frameModelController),
-          motorCount: int.tryParse(_motorCountController.text.trim()),
-          frameStyle: _nullableText(_frameStyleController),
-          firmwareTarget: _nullableText(_firmwareTargetController),
-          defaultFailSafeProfile: _nullableText(_failSafeController),
-          notes: _nullableText(_notesController),
-        ),
+      _NewVehicleDraft(
+        name: _nameController.text.trim(),
+        type: _type,
+        frameMake: _blankToNull(_frameMakeController.text),
+        frameModel: _frameModel,
+        motorCount: int.tryParse(_motorCountController.text.trim()),
+        frameStyle: _blankToNull(_frameStyleController.text),
+        firmwareTarget: _blankToNull(_firmwareTargetController.text),
+        defaultFailSafeProfile: _blankToNull(_failSafeController.text),
+        notes: _blankToNull(_notesController.text),
       ),
     );
   }
 
-  String? _nullableText(TextEditingController controller) {
-    final value = controller.text.trim();
-    return value.isEmpty ? null : value;
+  static String? _blankToNull(String? value) {
+    final trimmed = value?.trim() ?? '';
+    return trimmed.isEmpty ? null : trimmed;
   }
 }
 
-/// "Vehicles taken": a carousel of the three vehicle types. Tapping a type
-/// opens its details page; the vehicles picked for the session are listed
-/// below as removable chips (multi-select across and within types).
-class _VehicleChecklistSection extends StatefulWidget {
-  final IconData icon;
-  final String title;
+/// "Vehicles taken": every saved vehicle in a carousel, then an "Add new
+/// vehicle" card. Tap a vehicle to take it, tap again to remove it; the edit
+/// button opens its details. Selected vehicles are listed below as chips
+/// (tap = edit, × = remove).
+class _VehicleCarouselSection extends StatefulWidget {
   final List<Vehicle> vehicles;
-  final Set<String> selectedVehicleIds;
-  final bool isLoading;
-  final void Function(String vehicleId, bool isSelected) onChanged;
-  final ValueChanged<_VehicleType> onOpenType;
 
-  const _VehicleChecklistSection({
-    required this.icon,
-    required this.title,
+  final Set<String> selectedIds;
+  final bool isLoading;
+  final ValueChanged<Vehicle> onTapVehicle;
+  final ValueChanged<Vehicle> onEditVehicle;
+  final ValueChanged<Vehicle> onRemoveVehicle;
+  final VoidCallback onAddVehicle;
+
+  const _VehicleCarouselSection({
     required this.vehicles,
-    required this.selectedVehicleIds,
+    required this.selectedIds,
     required this.isLoading,
-    required this.onChanged,
-    required this.onOpenType,
+    required this.onTapVehicle,
+    required this.onEditVehicle,
+    required this.onRemoveVehicle,
+    required this.onAddVehicle,
   });
 
   @override
-  State<_VehicleChecklistSection> createState() =>
-      _VehicleChecklistSectionState();
+  State<_VehicleCarouselSection> createState() =>
+      _VehicleCarouselSectionState();
 }
 
-class _VehicleChecklistSectionState extends State<_VehicleChecklistSection> {
-  static const _types = _VehicleType.values;
-
+class _VehicleCarouselSectionState extends State<_VehicleCarouselSection> {
   final PageController _pageController = PageController();
   int _page = 0;
 
@@ -1876,71 +2904,69 @@ class _VehicleChecklistSectionState extends State<_VehicleChecklistSection> {
 
   @override
   Widget build(BuildContext context) {
+    final vehicles = widget.vehicles;
+    // One page per vehicle plus the trailing "Add new vehicle" page.
+    final pageCount = vehicles.length + 1;
+    final page = _page.clamp(0, pageCount - 1);
     final selected = [
-      for (final vehicle in widget.vehicles)
-        if (widget.selectedVehicleIds.contains(vehicle.id)) vehicle,
+      for (final vehicle in vehicles)
+        if (widget.selectedIds.contains(vehicle.id)) vehicle,
     ];
-    final selectedCount = selected.length;
 
     return _SectionShell(
-      icon: widget.icon,
-      title: selectedCount == 0
-          ? widget.title
-          : '${widget.title} ($selectedCount)',
+      icon: Icons.flight_takeoff_outlined,
+      title: selected.isEmpty
+          ? 'Vehicles taken'
+          : 'Vehicles taken (${selected.length})',
       child: widget.isLoading
           ? const LinearProgressIndicator()
           : Column(
               children: [
                 SizedBox(
-                  height: 214,
+                  height: 236,
                   child: Row(
                     children: [
                       _CarouselArrow(
                         icon: Icons.chevron_left,
-                        tooltip: 'Previous type',
-                        onPressed: _page > 0 ? () => _goTo(_page - 1) : null,
+                        tooltip: 'Previous',
+                        onPressed: page > 0 ? () => _goTo(page - 1) : null,
                       ),
                       Expanded(
                         child: PageView.builder(
                           controller: _pageController,
-                          itemCount: _types.length,
+                          itemCount: pageCount,
                           onPageChanged: (value) =>
                               setState(() => _page = value),
                           itemBuilder: (context, index) {
-                            final type = _types[index];
-                            final selectedOfType = [
-                              for (final vehicle in selected)
-                                if (_VehicleType.fromDb(vehicle.type) == type)
-                                  vehicle,
-                            ];
-                            return _VehicleTypeCard(
-                              type: type,
-                              selectedOfType: selectedOfType,
-                              // First tap opens the details pop-up; tapping
-                              // a selected type again removes it.
-                              onTap: selectedOfType.isEmpty
-                                  ? () => widget.onOpenType(type)
-                                  : () {
-                                      for (final vehicle in selectedOfType) {
-                                        widget.onChanged(vehicle.id, false);
-                                      }
-                                    },
+                            if (index == vehicles.length) {
+                              return _AddVehicleCard(
+                                onTap: widget.onAddVehicle,
+                              );
+                            }
+                            final vehicle = vehicles[index];
+                            return _VehicleCard(
+                              vehicle: vehicle,
+                              isSelected: widget.selectedIds.contains(
+                                vehicle.id,
+                              ),
+                              onTap: () => widget.onTapVehicle(vehicle),
+                              onEdit: () => widget.onEditVehicle(vehicle),
                             );
                           },
                         ),
                       ),
                       _CarouselArrow(
                         icon: Icons.chevron_right,
-                        tooltip: 'Next type',
-                        onPressed: _page < _types.length - 1
-                            ? () => _goTo(_page + 1)
+                        tooltip: 'Next',
+                        onPressed: page < pageCount - 1
+                            ? () => _goTo(page + 1)
                             : null,
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 8),
-                _PageDots(count: _types.length, current: _page),
+                _PageDots(count: pageCount, current: page),
                 if (selected.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   Align(
@@ -1960,13 +2986,9 @@ class _VehicleChecklistSectionState extends State<_VehicleChecklistSection> {
                                     color: AppColors.darkNavy,
                                   ),
                             label: Text(vehicle.name),
-                            tooltip: 'Edit details',
-                            onPressed: () {
-                              final type = _VehicleType.fromDb(vehicle.type);
-                              if (type != null) widget.onOpenType(type);
-                            },
-                            onDeleted: () =>
-                                widget.onChanged(vehicle.id, false),
+                            tooltip: 'Edit ${vehicle.name}',
+                            onPressed: () => widget.onEditVehicle(vehicle),
+                            onDeleted: () => widget.onRemoveVehicle(vehicle),
                             deleteButtonTooltipMessage: 'Remove',
                           ),
                       ],
@@ -1979,15 +3001,26 @@ class _VehicleChecklistSectionState extends State<_VehicleChecklistSection> {
   }
 }
 
-/// Dark blue hexagon showing a vehicle type's image.
+/// Dark blue hexagon showing a vehicle type's image (or [icon] when the type
+/// is unknown / for the add card).
 class _VehicleHexTile extends StatelessWidget {
-  final _VehicleType type;
+  final _VehicleType? type;
   final bool isSelected;
+  final IconData icon;
 
-  const _VehicleHexTile({required this.type, required this.isSelected});
+  const _VehicleHexTile({
+    required this.type,
+    required this.isSelected,
+    this.icon = Icons.flight,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final glyphColor = isSelected
+        ? AppVehicleTile.selectedGlyph
+        : AppVehicleTile.glyph;
+    final image = type?.imageAsset;
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       // Pointy-top regular hexagon: height = width * 2 / sqrt(3).
@@ -2019,81 +3052,128 @@ class _VehicleHexTile extends StatelessWidget {
               ]
             : null,
       ),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Blurred copy of the drawing behind it gives the glow.
-          if (isSelected)
-            ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-              child: Image.asset(
-                type.imageAsset,
-                color: AppVehicleTile.glyphGlow,
-                fit: BoxFit.contain,
-              ),
+      child: image == null
+          ? Icon(icon, size: 44, color: glyphColor)
+          : Stack(
+              fit: StackFit.expand,
+              children: [
+                // Blurred copy of the drawing behind it gives the glow.
+                if (isSelected)
+                  ImageFiltered(
+                    imageFilter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                    child: Image.asset(
+                      image,
+                      color: AppVehicleTile.glyphGlow,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                Image.asset(image, color: glyphColor, fit: BoxFit.contain),
+              ],
             ),
-          Image.asset(
-            type.imageAsset,
-            color: isSelected
-                ? AppVehicleTile.selectedGlyph
-                : AppVehicleTile.glyph,
-            fit: BoxFit.contain,
-          ),
-        ],
-      ),
     );
   }
 }
 
-class _VehicleTypeCard extends StatelessWidget {
-  final _VehicleType type;
-  final List<Vehicle> selectedOfType;
-  final VoidCallback onTap;
+class _VehicleCard extends StatelessWidget {
+  final Vehicle vehicle;
 
-  const _VehicleTypeCard({
-    required this.type,
-    required this.selectedOfType,
+  final bool isSelected;
+  final VoidCallback onTap;
+  final VoidCallback onEdit;
+
+  const _VehicleCard({
+    required this.vehicle,
+    required this.isSelected,
     required this.onTap,
+    required this.onEdit,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isSelected = selectedOfType.isNotEmpty;
+    final type = _VehicleType.fromDb(vehicle.type);
     final meta = isSelected
-        ? '${selectedOfType.first.name.toUpperCase()} · TAP TO REMOVE'
-        : 'TAP TO SELECT';
+        ? 'SELECTED · TAP TO REMOVE'
+        : '${type?.label.toUpperCase() ?? vehicle.type} · TAP TO SELECT';
 
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          vehicle.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: AppTextStyles.vehicleName,
+        ),
+        const SizedBox(height: 10),
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Semantics(
+              button: true,
+              selected: isSelected,
+              label: isSelected
+                  ? 'Remove ${vehicle.name}'
+                  : 'Take ${vehicle.name}',
+              child: GestureDetector(
+                onTap: onTap,
+                behavior: HitTestBehavior.opaque,
+                child: _VehicleHexTile(type: type, isSelected: isSelected),
+              ),
+            ),
+            // Edit button on the hexagon's upper-right edge.
+            Positioned(
+              top: 10,
+              right: -18,
+              child: Material(
+                color: AppColors.snowWhite,
+                shape: const CircleBorder(
+                  side: BorderSide(color: AppColors.borderStrong),
+                ),
+                child: IconButton(
+                  onPressed: onEdit,
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  tooltip: 'Edit ${vehicle.name}',
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text(
+          meta,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: isSelected
+              ? AppTextStyles.vehicleMeta.copyWith(color: AppColors.darkNavy)
+              : AppTextStyles.vehicleMeta,
+        ),
+      ],
+    );
+  }
+}
+
+class _AddVehicleCard extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _AddVehicleCard({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      selected: isSelected,
-      label: isSelected
-          ? 'Remove ${type.label} ${selectedOfType.first.name}'
-          : 'Add ${type.label}',
+      label: 'Add new vehicle',
       child: GestureDetector(
         onTap: onTap,
         behavior: HitTestBehavior.opaque,
-        child: Column(
+        child: const Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _VehicleHexTile(type: type, isSelected: isSelected),
-            const SizedBox(height: 12),
-            Text(
-              type.label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.vehicleName,
-            ),
-            const SizedBox(height: 2),
-            Text(
-              meta,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: isSelected
-                  ? AppTextStyles.vehicleMeta.copyWith(
-                      color: AppColors.darkNavy,
-                    )
-                  : AppTextStyles.vehicleMeta,
-            ),
+            Text('New vehicle', style: AppTextStyles.vehicleName),
+            SizedBox(height: 10),
+            _VehicleHexTile(type: null, isSelected: false, icon: Icons.add),
+            SizedBox(height: 10),
+            Text('TAP TO ADD', style: AppTextStyles.vehicleMeta),
           ],
         ),
       ),

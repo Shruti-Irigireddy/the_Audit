@@ -37,4 +37,3 @@ mixin DaoWriteHelpers on DatabaseAccessor<AppDatabase> {
     );
   }
 }
-

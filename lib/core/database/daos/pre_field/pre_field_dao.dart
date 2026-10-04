@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/core/database/dtos/pre_field_dtos.dart';
 import 'package:the_audit/core/database/dtos/shared_dtos.dart';
 import 'package:uuid/uuid.dart';
@@ -377,9 +378,17 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
     required String sessionId,
     required String vehicleId,
     String? objective,
+    int quantity = 1,
     required String performedBy,
   }) async {
-    _log.t('addVehicleToSession(sessionId: $sessionId, vehicleId: $vehicleId)');
+    _log.t(
+      'addVehicleToSession(sessionId: $sessionId, vehicleId: $vehicleId, '
+      'quantity: $quantity)',
+    );
+    if (quantity < 1) {
+      _log.w('Vehicle quantity must be at least 1.');
+      throw Exception('Vehicle quantity must be at least 1.');
+    }
     return _log.trace('addVehicleToSession', () async {
       await _requireFieldSession(sessionId);
       await _requireVehicle(vehicleId);
@@ -405,6 +414,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
             sessionId: sessionId,
             vehicleId: vehicleId,
             objective: Value(objective),
+            quantity: Value(quantity),
           ),
         );
 
@@ -1073,6 +1083,16 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
         battery: row.readTable(db.batteries),
       );
     }).toList();
+  }
+
+  /// People who can be picked as PIC / VO / crew, by name. Excludes the
+  /// reserved system user.
+  Future<List<User>> getSelectableUsers() {
+    _log.t('getSelectableUsers()');
+    return (select(db.users)
+          ..where((u) => u.id.equals(DbUsers.systemUserId).not())
+          ..orderBy([(u) => OrderingTerm.asc(u.name)]))
+        .get();
   }
 
   Future<List<EquipmentList>> getActiveEquipmentList() {

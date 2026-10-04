@@ -144,6 +144,28 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionId);
 
+        // The first pre-flight starts the field work: PLANNED -> IN_PROGRESS.
+        if (session.sessionStatus == 'PLANNED') {
+          await (update(
+            db.fieldSessions,
+          )..where((v) => v.sessionId.equals(sessionId))).write(
+            const FieldSessionsCompanion(sessionStatus: Value('IN_PROGRESS')),
+          );
+          await _insertAuditEvent(
+            entityType: 'FIELD_SESSION',
+            entityId: sessionId,
+            action: 'UPDATE',
+            description: 'Session started (PLANNED -> IN_PROGRESS)',
+            performedBy: performedBy,
+          );
+          await _enqueueSync(
+            entityType: 'FIELD_SESSION',
+            entityId: sessionId,
+            operation: 'UPDATE',
+          );
+          _log.i('session $sessionId started: PLANNED -> IN_PROGRESS');
+        }
+
         await _insertAuditEvent(
           entityType: 'SORTIE',
           entityId: id,

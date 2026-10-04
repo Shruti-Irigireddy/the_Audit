@@ -1,7 +1,9 @@
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
+import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/core/database/sql_log_interceptor.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
+import 'package:uuid/uuid.dart';
 
 import 'daos/vehicle/vehicle_dao.dart';
 import 'daos/payload/payload_dao.dart';
@@ -12,11 +14,16 @@ import 'daos/post_flight/post_flight_dao.dart';
 import 'daos/records/record_dao.dart';
 import 'daos/sync/sync_dao.dart';
 import 'daos/export/export_dao.dart';
+import 'daos/equipment/equipment_dao.dart';
 
 part 'app_database.g.dart';
 
 class Users extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get name => text()();
   TextColumn get role => text()(); // ADMIN, PIC, VO, crew
   BoolColumn get defaultPic => boolean().withDefault(const Constant(false))();
@@ -26,11 +33,16 @@ class Users extends Table {
 }
 
 class Vehicles extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get name => text()();
   TextColumn get type => text()(); // MULTIROTOR, FIXED_WING, VTOL
   TextColumn get frameMake => text().nullable()();
   TextColumn get frameModel => text().nullable()();
+  // Total motors; a VTOL with 4 lift + 1 pusher is stored as 5.
   IntColumn get motorCount => integer().nullable()();
   TextColumn get frameStyle => text().nullable()();
   TextColumn get firmwareTarget => text().nullable()();
@@ -50,7 +62,11 @@ class Vehicles extends Table {
 // )
 
 class VehicleChecklistTemplates extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get vehicleId => text().references(Vehicles, #id)();
   IntColumn get version => integer()();
   BoolColumn get isActive => boolean().withDefault(const Constant(true))();
@@ -68,7 +84,11 @@ class VehicleChecklistTemplates extends Table {
 }
 
 class ChecklistItems extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get templateId =>
       text().references(VehicleChecklistTemplates, #id)();
   TextColumn get section => text()(); // Airframe, Comms, Ready to Arm
@@ -89,7 +109,11 @@ class ChecklistItems extends Table {
 }
 
 class FieldSessions extends Table {
-  TextColumn get sessionId => text().customConstraint('PRIMARY KEY')();
+  TextColumn get sessionId => text()();
+
+  @override
+  Set<Column> get primaryKey => {sessionId};
+
   DateTimeColumn get date => dateTime()();
   TextColumn get locationName => text()();
   RealColumn get latitude => real()();
@@ -109,7 +133,11 @@ class FieldSessions extends Table {
 // Team members - list of userIds (multi-enum)
 @TableIndex(name: 'idx_session_users_session_id', columns: {#sessionId})
 class SessionUsers extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get sessionId => text().references(FieldSessions, #sessionId)();
   TextColumn get userId => text().references(Users, #id)();
   TextColumn get role => text()(); // PIC, VO, Crew
@@ -119,10 +147,16 @@ class SessionUsers extends Table {
 // Vehicle taken - list of vehicleIds (multi-enum)
 @TableIndex(name: 'idx_session_vehicles_session_id', columns: {#sessionId})
 class SessionVehicles extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get sessionId => text().references(FieldSessions, #sessionId)();
   TextColumn get vehicleId => text().references(Vehicles, #id)();
   TextColumn get objective => text().nullable()();
+  // How many units of this vehicle are taken to the field.
+  IntColumn get quantity => integer().withDefault(const Constant(1))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 
   @override
@@ -132,7 +166,11 @@ class SessionVehicles extends Table {
 }
 
 class SessionVehiclePayload extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get sessionVehicleId => text().references(SessionVehicles, #id)();
   TextColumn get payloadId => text().references(Payloads, #payloadId)();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
@@ -144,7 +182,11 @@ class SessionVehiclePayload extends Table {
 }
 
 class Batteries extends Table {
-  TextColumn get batteryId => text().customConstraint('PRIMARY KEY')();
+  TextColumn get batteryId => text()();
+
+  @override
+  Set<Column> get primaryKey => {batteryId};
+
   TextColumn get config => text()(); // 4S, 6S, 8S, 12S
   IntColumn get capacity => integer().nullable()(); // mAh
   RealColumn get voltage => real().nullable()(); // V
@@ -158,7 +200,11 @@ class Batteries extends Table {
 
 @TableIndex(name: 'idx_session_batteries_session_id', columns: {#sessionId})
 class SessionBatteries extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get sessionId => text().references(FieldSessions, #sessionId)();
   TextColumn get batteryId => text().references(Batteries, #batteryId)();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
@@ -170,7 +216,11 @@ class SessionBatteries extends Table {
 }
 
 class Payloads extends Table {
-  TextColumn get payloadId => text().customConstraint('PRIMARY KEY')();
+  TextColumn get payloadId => text()();
+
+  @override
+  Set<Column> get primaryKey => {payloadId};
+
   TextColumn get name => text()();
   TextColumn get category =>
       text()(); // RGB/ Thermal, LiDAR, Multispectral, Hyperspectral, Mapping, Other
@@ -193,7 +243,11 @@ class Payloads extends Table {
   columns: {#vehicleType},
 )
 class PayloadVehicleCompatibility extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get payloadId => text().references(Payloads, #payloadId)();
   TextColumn get vehicleType => text()(); // MULTIROTOR, FIXED_WING, VTOL
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
@@ -204,8 +258,30 @@ class PayloadVehicleCompatibility extends Table {
   ];
 }
 
+/// Specific vehicles a payload is limited to. When a payload has rows here,
+/// only these vehicles may carry it; otherwise its vehicle-type rules apply.
+class PayloadVehicles extends Table {
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  TextColumn get payloadId => text().references(Payloads, #payloadId)();
+  TextColumn get vehicleId => text().references(Vehicles, #id)();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+    {payloadId, vehicleId},
+  ];
+}
+
 class EquipmentLists extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get name =>
       text()(); // Batteries, Charger, RC, GCS, Telemetry Radio, Tools, Props, Laptop
   TextColumn get category =>
@@ -219,7 +295,11 @@ class EquipmentLists extends Table {
   columns: {#sessionId},
 )
 class SessionEquipmentChecks extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get sessionId => text().references(FieldSessions, #sessionId)();
   TextColumn get equipmentId => text().references(EquipmentLists, #id)();
   BoolColumn get isPacked => boolean().withDefault(const Constant(false))();
@@ -235,10 +315,68 @@ class SessionEquipmentChecks extends Table {
   ];
 }
 
+/// Standard "equipment to bring" lists: one per vehicle, plus the Tools list
+/// (vehicleId null) that every session takes.
+@TableIndex(
+  name: 'idx_equipment_template_items_vehicle_id',
+  columns: {#vehicleId},
+)
+class EquipmentTemplateItems extends Table {
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  // Null = the Tools list.
+  TextColumn get vehicleId => text().references(Vehicles, #id).nullable()();
+  TextColumn get category => text()(); // Airframe, Subsystems, ..., Tools
+  TextColumn get name => text()();
+  IntColumn get quantity => integer().nullable()();
+  IntColumn get spares => integer().nullable()();
+  IntColumn get categoryOrder => integer()();
+  IntColumn get sortOrder => integer()();
+  BoolColumn get isActive => boolean().withDefault(const Constant(true))();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
+}
+
+/// What a session takes: a snapshot of the lists at save time, with packing.
+@TableIndex(
+  name: 'idx_session_equipment_items_session_id',
+  columns: {#sessionId},
+)
+class SessionEquipmentItems extends Table {
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  TextColumn get sessionId => text().references(FieldSessions, #sessionId)();
+  // Null = Tools.
+  TextColumn get sessionVehicleId =>
+      text().references(SessionVehicles, #id).nullable()();
+  TextColumn get templateItemId =>
+      text().references(EquipmentTemplateItems, #id).nullable()();
+  TextColumn get category => text()();
+  TextColumn get name => text()();
+  IntColumn get quantity => integer().nullable()();
+  IntColumn get spares => integer().nullable()();
+  BoolColumn get isPacked => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get packedAt => dateTime().nullable()();
+  TextColumn get packedBy => text().references(Users, #id).nullable()();
+  IntColumn get categoryOrder => integer()();
+  IntColumn get sortOrder => integer()();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+}
+
 @TableIndex(name: 'idx_sorties_session_id', columns: {#sessionId})
 @TableIndex(name: 'idx_sorties_flight_status', columns: {#flightStatus})
 class Sorties extends Table {
-  TextColumn get flightId => text().customConstraint('PRIMARY KEY')();
+  TextColumn get flightId => text()();
+
+  @override
+  Set<Column> get primaryKey => {flightId};
+
   TextColumn get sessionId => text().references(FieldSessions, #sessionId)();
   IntColumn get sequenceNo =>
       integer()(); // Sequence number of the flight in the session - more than one flight can be conducted in a single session (Auto-incremented within a session)
@@ -275,7 +413,11 @@ class Sorties extends Table {
 
 @TableIndex(name: 'idx_sortie_payloads_flight_id', columns: {#flightId})
 class SortiePayloads extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get flightId => text().references(Sorties, #flightId)();
   TextColumn get payloadId => text().references(Payloads, #payloadId)();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
@@ -288,7 +430,11 @@ class SortiePayloads extends Table {
 
 @TableIndex(name: 'idx_sortie_batteries_flight_id', columns: {#flightId})
 class SortieBatteries extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get flightId => text().references(Sorties, #flightId)();
   TextColumn get batteryId => text().references(Batteries, #batteryId)();
   RealColumn get voltageStart => real().nullable()();
@@ -306,7 +452,11 @@ class SortieBatteries extends Table {
 
 @TableIndex(name: 'idx_sortie_users_flight_id', columns: {#flightId})
 class SortieUsers extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get flightId => text().references(Sorties, #flightId)();
   TextColumn get userId => text().references(Users, #id)();
   TextColumn get role => text()(); // PIC, VO, Crew
@@ -320,7 +470,11 @@ class SortieUsers extends Table {
 
 @TableIndex(name: 'idx_checklist_responses_flight_id', columns: {#flightId})
 class ChecklistResponses extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get flightId => text().references(Sorties, #flightId)();
   TextColumn get itemId => text().references(ChecklistItems, #id)();
   TextColumn get response => text()(); // PASS/FAIL/NA, VALUE, CHECKBOX, TEXT
@@ -340,7 +494,11 @@ class ChecklistResponses extends Table {
 
 @TableIndex(name: 'idx_post_flight_notes_flight_id', columns: {#flightId})
 class PostFlightNotes extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get flightId => text().references(Sorties, #flightId).unique()();
   TextColumn get objectiveResult => text()(); // Yes/No/Partial
   TextColumn get objectiveNotes => text().nullable()();
@@ -367,7 +525,11 @@ class PostFlightNotes extends Table {
 
 @TableIndex(name: 'idx_checklist_overrides_flight_id', columns: {#flightId})
 class ChecklistOverrides extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get flightId => text().references(Sorties, #flightId)();
   TextColumn get itemId => text().references(ChecklistItems, #id)();
   TextColumn get checklistResponseId =>
@@ -379,8 +541,7 @@ class ChecklistOverrides extends Table {
 
 @TableIndex(name: 'idx_audit_events_entity', columns: {#entityType, #entityId})
 class AuditEvents extends Table {
-  IntColumn get id =>
-      integer().customConstraint('PRIMARY KEY').autoIncrement()();
+  IntColumn get id => integer().autoIncrement()();
   TextColumn get entityType =>
       text()(); // User, Vehicle, Flight, Battery, Payload
   TextColumn get entityId =>
@@ -398,7 +559,11 @@ class AuditEvents extends Table {
   columns: {#entityType, #entityId},
 )
 class RecordAmendments extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get entityType =>
       text()(); // SORTIE, POST_FLIGHT_NOTES, CHECKLIST_RESPONSE
   TextColumn get entityId => text()();
@@ -416,8 +581,7 @@ class RecordAmendments extends Table {
   columns: {#entityType, #entityId},
 )
 class ExportRecords extends Table {
-  IntColumn get id =>
-      integer().customConstraint('PRIMARY KEY').autoIncrement()();
+  IntColumn get id => integer().autoIncrement()();
   TextColumn get entityType =>
       text()(); // User, Vehicle, Flight, Battery, Payload
   TextColumn get entityId =>
@@ -438,8 +602,7 @@ class ExportRecords extends Table {
 @TableIndex(name: 'idx_sync_queue_status', columns: {#syncStatus})
 @TableIndex(name: 'idx_sync_queue_entity', columns: {#entityType, #entityId})
 class SyncQueue extends Table {
-  IntColumn get id =>
-      integer().customConstraint('PRIMARY KEY').autoIncrement()();
+  IntColumn get id => integer().autoIncrement()();
   TextColumn get entityType => text()();
   TextColumn get entityId => text()();
   TextColumn get operation => text()(); // INSERT, UPDATE, DELETE
@@ -455,7 +618,11 @@ class SyncQueue extends Table {
 }
 
 class LocalAuthSessions extends Table {
-  TextColumn get id => text().customConstraint('PRIMARY KEY')();
+  TextColumn get id => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
   TextColumn get userId => text().references(Users, #id)();
   BoolColumn get isActive => boolean().withDefault(const Constant(true))();
   DateTimeColumn get loginAt => dateTime().withDefault(currentDateAndTime)();
@@ -486,8 +653,11 @@ class LocalAuthSessions extends Table {
     ExportRecords,
     SessionVehiclePayload,
     PayloadVehicleCompatibility,
+    PayloadVehicles,
     SessionEquipmentChecks,
     EquipmentLists,
+    EquipmentTemplateItems,
+    SessionEquipmentItems,
     RecordAmendments,
     LocalAuthSessions,
   ],
@@ -501,10 +671,14 @@ class LocalAuthSessions extends Table {
     ExportDao,
     RecordDao,
     SyncDao,
+    EquipmentDao,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
+
+  /// For tests: runs against the given executor (e.g. an in-memory DB).
+  AppDatabase.forTesting(super.executor);
 
   /// With app logging on, every SQL statement is logged (SqlLogInterceptor).
   static QueryExecutor _openConnection() {
@@ -515,18 +689,484 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration {
     return MigrationStrategy(
-      onCreate: (m) => m.createAll(),
+      onCreate: (m) async {
+        await m.createAll();
+        await _insertDefaultFleet();
+        await _insertDefaultPayloads();
+        await _insertDefaultEquipmentLists();
+        await _insertDefaultPayloadVehicleLimits();
+      },
       onUpgrade: (m, from, to) async {
         if (from < 2) {
           await m.addColumn(payloads, payloads.status);
           await m.addColumn(checklistResponses, checklistResponses.responseAt);
         }
+        if (from < 3) {
+          await m.addColumn(sessionVehicles, sessionVehicles.quantity);
+          await _insertDefaultFleet();
+        }
+        if (from < 4) {
+          // Data only: the team's standard payloads.
+          await _insertDefaultPayloads();
+        }
+        if (from < 5) {
+          await m.createTable(equipmentTemplateItems);
+          await m.createTable(sessionEquipmentItems);
+          await _insertDefaultEquipmentLists();
+        }
+        if (from < 6) {
+          await m.createTable(payloadVehicles);
+          await _insertDefaultPayloadVehicleLimits();
+        }
       },
     );
+  }
+
+  /// The reserved author of data the app creates itself.
+  Future<void> _ensureSystemUser() {
+    return into(users).insert(
+      UsersCompanion.insert(
+        id: DbUsers.systemUserId,
+        name: 'System',
+        role: 'ADMIN',
+        email: 'system@the-audit.local',
+      ),
+      mode: InsertMode.insertOrIgnore,
+    );
+  }
+
+  /// Limits payloads to specific vehicles where the team's list says so:
+  /// Motion Metrics IP is only for Dorsata and Cerana. Skips a payload that
+  /// already has limits, and vehicles/payloads that don't exist.
+  Future<void> _insertDefaultPayloadVehicleLimits() async {
+    const limits = {
+      'Motion Metrics IP – Ethernet': ['Dorsata', 'Cerana'],
+    };
+    const uuid = Uuid();
+
+    final payloadsByName = {
+      for (final payload in await select(payloads).get())
+        payload.name.trim().toLowerCase(): payload,
+    };
+    final vehiclesByName = {
+      for (final vehicle in await select(vehicles).get())
+        vehicle.name.trim().toLowerCase(): vehicle,
+    };
+
+    var added = 0;
+    for (final entry in limits.entries) {
+      final payload = payloadsByName[entry.key.toLowerCase()];
+      if (payload == null) continue;
+      final existing = await (select(
+        payloadVehicles,
+      )..where((t) => t.payloadId.equals(payload.payloadId))).get();
+      if (existing.isNotEmpty) continue;
+
+      for (final vehicleName in entry.value) {
+        final vehicle = vehiclesByName[vehicleName.toLowerCase()];
+        if (vehicle == null) continue;
+        await into(payloadVehicles).insert(
+          PayloadVehiclesCompanion.insert(
+            id: uuid.v4(),
+            payloadId: payload.payloadId,
+            vehicleId: vehicle.id,
+          ),
+        );
+        added++;
+      }
+    }
+    const AppLogger('AppDatabase').i('payload vehicle limits: $added added');
+  }
+
+  /// Writes the standard "equipment to bring" lists (from the team's
+  /// sheets): Tools for every session, plus Kari, Dorsata and Cerana. A list
+  /// is skipped if its vehicle is missing or it already has items. Like the
+  /// other defaults, runs only from migrations. "4+1" counts are stored as 5.
+  Future<void> _insertDefaultEquipmentLists() async {
+    // (item, quantity, spares); null = blank on the sheet.
+    const tools = <(String, int?, int?)>[
+      ('Tweezers', 1, null),
+      ('Nipper', 1, null),
+      ('Nose Plier', 1, null),
+      ('Cutting Plier', 1, null),
+      ('Bosch Kit', 1, null),
+      ('Cutter', 1, null),
+      ('GF Tape', 2, null),
+      ('3M Tape', 1, null),
+      ('Double Sided Tape', 1, null),
+      ('Insulation tape', 1, null),
+      ('Stapler', 1, null),
+      ('Chordless Drill', 1, null),
+      ('Drill bit set', 1, null),
+      ('Zip Ties Set', 3, null),
+      ('MobileTripod', 1, null),
+      ('RTK Tripod(If required)', 1, null),
+      ('Alen key set', 1, null),
+      ('Heat Shrink Set', 1, null),
+      ('Gas Torch', 1, null),
+      ('Multimeter', 1, null),
+      ('Clampmeter', 1, null),
+      ('Temperature gun', 1, null),
+      ('Rubber Bands', null, null),
+      ('Soldering iron', 1, null),
+      ('Soldering tin lead', 1, null),
+      ('Soldering Flux', 1, null),
+      ('Feviquick', 1, null),
+    ];
+    const powerSystems = <(String, int?, int?)>[
+      ('Batteries', null, null),
+      ('Battery Charger', 1, null),
+      ('Battery Charging Chord', 1, null),
+      ('Battery XT60 to XT90 Connectors', 2, null),
+      ('Power Station', 1, null),
+      ('Power Station Chord', 1, null),
+      ('Power Station plug extension', 1, null),
+    ];
+    const elrsP900Comms = <(String, int?, int?)>[
+      ('Transmitter MKIII', 1, null),
+      ('ELRS Module (In case of MKII)', 1, null),
+      ('ELRS receiver', 1, null),
+      ('ELRS Antennas', 2, null),
+      ('P900 Air unit', 1, null),
+      ('P900 Ground unit', 1, null),
+      ('P900 Antenas', 2, null),
+      ('3S Battery', 1, null),
+      ('3S Battery Connector', 1, null),
+      ('Type C-USB Cable', 1, null),
+    ];
+    const vehicleLists = <String, List<(String, List<(String, int?, int?)>)>>{
+      'Kari': [
+        (
+          'Airframe',
+          [
+            ('Drone Frame', 1, null),
+            ('Motors', 4, null),
+            ('Propellers', 4, 4),
+            ('Propeller Bolts(If props are not installed)', 4, null),
+            ('Battery Straps', 2, null),
+          ],
+        ),
+        (
+          'Subsystems',
+          [('GPS', 1, 1), ('Battery XT60 to XT90 connector', 2, null)],
+        ),
+        (
+          'Communication Systems',
+          [
+            ('Transmitter MKII', 1, null),
+            ('PPM receiver', 1, null),
+            ('P900 Antennas AU', 2, null),
+            ('RFD900 Air unit', 1, null),
+            ('RFD900 Ground unit', 1, null),
+            ('RFD900 Antenas GU', 2, null),
+          ],
+        ),
+        ('Power Systems', powerSystems),
+      ],
+      'Dorsata': [
+        (
+          'Airframe',
+          [
+            ('Drone Frame', 1, null),
+            ('Motors', 4, null),
+            ('Propellers', 4, 4),
+            ('Propeller Bolts(If props are not installed)', 4, null),
+            ('Battery Straps', 2, null),
+          ],
+        ),
+        (
+          'Subsystems',
+          [
+            ('GPS', 1, 1),
+            ('Battery Y Splitter', 1, null),
+            ('Battery XT60 to XT90 connector', 2, null),
+          ],
+        ),
+        ('Communication Systems', elrsP900Comms),
+        ('Power Systems', powerSystems),
+      ],
+      'Cerana': [
+        (
+          'Airframe',
+          [
+            ('Fuselage', 1, null),
+            ('Wings', 2, null),
+            ('Spars', 2, null),
+            ('Motors', 5, null), // 4+1
+            ('Propellers', 5, 5), // 4+1, spares 4+1
+            ('Propeller Bolts(If props are not installed)', 5, null), // 4+1
+            ('Pusher Motor Bolt', 1, null),
+            ('Battery Straps', 2, null),
+            ('Canopies', 2, null),
+            ('Canopy Bolts', null, null),
+          ],
+        ),
+        (
+          'Subsystems',
+          [
+            ('GPS', 1, 1),
+            ('Airspeed Sensor cap', 1, null),
+            ('Battery Y Splitter', 1, null),
+            ('Battery XT60 to XT90 connector', 2, null),
+          ],
+        ),
+        ('Communication Systems', elrsP900Comms),
+        ('Power Systems', powerSystems),
+      ],
+    };
+    const uuid = Uuid();
+
+    await _ensureSystemUser();
+
+    Future<bool> hasItems(String? vehicleId) async {
+      final query = select(equipmentTemplateItems)
+        ..where(
+          (t) => vehicleId == null
+              ? t.vehicleId.isNull()
+              : t.vehicleId.equals(vehicleId),
+        )
+        ..limit(1);
+      return (await query.get()).isNotEmpty;
+    }
+
+    Future<void> writeList(
+      String? vehicleId,
+      List<(String, List<(String, int?, int?)>)> categories,
+    ) async {
+      for (var c = 0; c < categories.length; c++) {
+        final (category, items) = categories[c];
+        for (var i = 0; i < items.length; i++) {
+          final (name, quantity, spares) = items[i];
+          await into(equipmentTemplateItems).insert(
+            EquipmentTemplateItemsCompanion.insert(
+              id: uuid.v4(),
+              vehicleId: Value(vehicleId),
+              category: category,
+              name: name,
+              quantity: Value(quantity),
+              spares: Value(spares),
+              categoryOrder: c,
+              sortOrder: i,
+            ),
+          );
+        }
+      }
+      // No sync_queue row: every install creates these lists itself.
+      await into(auditEvents).insert(
+        AuditEventsCompanion.insert(
+          entityType: 'EQUIPMENT_LIST',
+          entityId: vehicleId ?? 'TOOLS',
+          action: DbActions.create,
+          description: const Value('Default equipment list'),
+          performedBy: DbUsers.systemUserId,
+        ),
+      );
+    }
+
+    var written = 0;
+    if (!await hasItems(null)) {
+      await writeList(null, [('Tools', tools)]);
+      written++;
+    }
+
+    final vehiclesByName = {
+      for (final vehicle in await select(vehicles).get())
+        vehicle.name.trim().toLowerCase(): vehicle,
+    };
+    for (final entry in vehicleLists.entries) {
+      final vehicle = vehiclesByName[entry.key.toLowerCase()];
+      if (vehicle == null || await hasItems(vehicle.id)) continue;
+      await writeList(vehicle.id, entry.value);
+      written++;
+    }
+    const AppLogger('AppDatabase').i('default equipment lists: $written added');
+  }
+
+  /// Writes the team's standard payloads and the vehicle types each fits.
+  /// Like [_insertDefaultFleet], runs only from migrations and skips names
+  /// that already exist (any status).
+  Future<void> _insertDefaultPayloads() async {
+    const allTypes = ['MULTIROTOR', 'VTOL', 'FIXED_WING'];
+    const payloadsToAdd = [
+      (
+        name: 'Jetson Orin Nano 8GB',
+        category: 'Companion Computer',
+        storageType: 'SD card + NVMe SSD',
+        storageCapacity: '64GB / 128GB SD',
+        vehicleTypes: allTypes,
+      ),
+      (
+        name: 'Pi 5 – 8GB',
+        category: 'Companion Computer',
+        storageType: 'SD card',
+        storageCapacity: '64GB',
+        vehicleTypes: allTypes,
+      ),
+      (
+        name: 'FLIR Camera – USB',
+        category: 'Mono Camera, RGB',
+        storageType: null,
+        storageCapacity: null,
+        vehicleTypes: allTypes,
+      ),
+      (
+        name: 'Lucid Camera – Ethernet',
+        category: 'RGB Camera',
+        storageType: null,
+        storageCapacity: null,
+        vehicleTypes: allTypes,
+      ),
+      (
+        // Meant for Dorsata / Cerana (maybe Kari later); stored by type.
+        name: 'Motion Metrics IP – Ethernet',
+        category: 'Thermal',
+        storageType: null,
+        storageCapacity: null,
+        vehicleTypes: ['MULTIROTOR', 'VTOL'],
+      ),
+    ];
+    const uuid = Uuid();
+
+    await _ensureSystemUser();
+
+    final existingNames = {
+      for (final payload in await select(payloads).get())
+        payload.name.trim().toLowerCase(),
+    };
+
+    var added = 0;
+    for (final payload in payloadsToAdd) {
+      if (existingNames.contains(payload.name.toLowerCase())) continue;
+
+      final payloadId = uuid.v4();
+      await into(payloads).insert(
+        PayloadsCompanion.insert(
+          payloadId: payloadId,
+          name: payload.name,
+          category: payload.category,
+          storageType: Value(payload.storageType),
+          storageCapacity: Value(payload.storageCapacity),
+        ),
+      );
+      for (final type in payload.vehicleTypes) {
+        await into(payloadVehicleCompatibility).insert(
+          PayloadVehicleCompatibilityCompanion.insert(
+            id: uuid.v4(),
+            payloadId: payloadId,
+            vehicleType: type,
+          ),
+        );
+      }
+      // No sync_queue row: every install creates these payloads itself.
+      await into(auditEvents).insert(
+        AuditEventsCompanion.insert(
+          entityType: DbEntityTypes.payload,
+          entityId: payloadId,
+          action: DbActions.create,
+          description: const Value('Default payload'),
+          performedBy: DbUsers.systemUserId,
+        ),
+      );
+      added++;
+    }
+    const AppLogger('AppDatabase').i('default payloads: $added added');
+  }
+
+  /// Writes the team's standard fleet into this database. Runs only from
+  /// migrations (first creation / upgrade), so the values below are starting
+  /// data: afterwards vehicles are read from and edited in the `vehicles` table.
+  Future<void> _insertDefaultFleet() async {
+    const fleet = [
+      (
+        name: 'Cerana',
+        type: 'VTOL',
+        motorCount: 5, // 4 lift + 1 pusher
+        frameMake: 'Carbon composite',
+        frameModel: 'Fixed',
+      ),
+      (
+        name: 'Dorsata',
+        type: 'MULTIROTOR',
+        motorCount: 4,
+        frameMake: 'Carbon composite',
+        frameModel: 'Fixed',
+      ),
+      (
+        name: 'Kari',
+        type: 'MULTIROTOR',
+        motorCount: 4,
+        frameMake: 'Carbon fiber',
+        frameModel: 'Fixed',
+      ),
+      (
+        name: 'Striver',
+        type: 'VTOL',
+        motorCount: 5, // 4 lift + 1 pusher
+        frameMake: 'EPP and carbon',
+        frameModel: 'Folding',
+      ),
+    ];
+    const uuid = Uuid();
+
+    await _ensureSystemUser();
+
+    // Match by name in any status, so a retired/renamed vehicle isn't re-added.
+    final existingNames = {
+      for (final vehicle in await select(vehicles).get())
+        vehicle.name.trim().toLowerCase(),
+    };
+
+    var added = 0;
+    for (final vehicle in fleet) {
+      if (existingNames.contains(vehicle.name.toLowerCase())) continue;
+
+      final vehicleId = uuid.v4();
+      final templateId = uuid.v4();
+      await into(vehicles).insert(
+        VehiclesCompanion.insert(
+          id: vehicleId,
+          name: vehicle.name,
+          type: vehicle.type,
+          motorCount: Value(vehicle.motorCount),
+          frameMake: Value(vehicle.frameMake),
+          frameModel: Value(vehicle.frameModel),
+        ),
+      );
+      await into(vehicleChecklistTemplates).insert(
+        VehicleChecklistTemplatesCompanion.insert(
+          id: templateId,
+          vehicleId: vehicleId,
+          version: 1,
+          createdBy: const Value(DbUsers.systemUserId),
+        ),
+      );
+      await into(checklistItems).insert(
+        ChecklistItemsCompanion.insert(
+          id: uuid.v4(),
+          templateId: templateId,
+          section: 'General',
+          label: 'Visual inspection complete',
+          responseType: 'PASS_FAIL_NA',
+          sortOrder: 0,
+        ),
+      );
+      // No sync_queue row: every install creates these vehicles itself.
+      await into(auditEvents).insert(
+        AuditEventsCompanion.insert(
+          entityType: DbEntityTypes.vehicle,
+          entityId: vehicleId,
+          action: DbActions.create,
+          description: const Value('Default fleet vehicle'),
+          performedBy: DbUsers.systemUserId,
+        ),
+      );
+      added++;
+    }
+    const AppLogger('AppDatabase').i('default fleet: $added vehicles added');
   }
 }

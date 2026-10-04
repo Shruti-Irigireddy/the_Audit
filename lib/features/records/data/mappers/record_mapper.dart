@@ -131,8 +131,7 @@ extension SessionBatteryWithBatteryMapper on SessionBatteryWithBattery {
   }
 }
 
-extension SessionEquipmentCheckWithItemMapper
-    on SessionEquipmentCheckWithItem {
+extension SessionEquipmentCheckWithItemMapper on SessionEquipmentCheckWithItem {
   SessionEquipmentCheckWithItemEntity toEntity() {
     return SessionEquipmentCheckWithItemEntity(
       id: sessionEquipmentCheck.id,

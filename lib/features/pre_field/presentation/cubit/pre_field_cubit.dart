@@ -309,9 +309,10 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     required String sessionId,
     required String vehicleId,
     String? objective,
+    int quantity = 1,
     required String performedBy,
   }) async {
-    _log.i('addVehicleToSession($sessionId, vehicle: $vehicleId)');
+    _log.i('addVehicleToSession($sessionId, vehicle: $vehicleId x$quantity)');
     emit(
       state.copyWith(viewStatus: PreFieldViewStatus.saving, errorMessage: null),
     );
@@ -321,6 +322,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
         sessionId: sessionId,
         vehicleId: vehicleId,
         objective: objective,
+        quantity: quantity,
         performedBy: performedBy,
       );
       await loadSession(sessionId);

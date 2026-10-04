@@ -1,20 +1,13 @@
 import 'package:the_audit/features/records/domain/entities/record_entity.dart';
 
 abstract class RecordRepository {
-
   Future<FieldSessionEntity?> getSessionById(String sessionId);
 
-  Future<List<FieldSessionEntity>> getRecentSessions({
-    int limit = 50,
-  });
+  Future<List<FieldSessionEntity>> getRecentSessions({int limit = 50});
 
-  Future<List<FieldSessionEntity>> getRecentClosedSessions({
-    int limit = 50,
-  });
+  Future<List<FieldSessionEntity>> getRecentClosedSessions({int limit = 50});
 
-  Future<List<FieldSessionEntity>> getInProgressSessions({
-    int limit = 50,
-  });
+  Future<List<FieldSessionEntity>> getInProgressSessions({int limit = 50});
 
   Future<List<FieldSessionEntity>> searchSessions({
     required String query,
@@ -62,8 +55,9 @@ abstract class RecordRepository {
     String flightId,
   );
 
-  Future<List<ChecklistResponseWithItemEntity>>
-      getChecklistResponsesForFlight(String flightId);
+  Future<List<ChecklistResponseWithItemEntity>> getChecklistResponsesForFlight(
+    String flightId,
+  );
 
   Future<List<ChecklistOverrideEntity>> getOverridesForFlight(String flightId);
 
@@ -76,9 +70,7 @@ abstract class RecordRepository {
 
   Future<List<AuditEventEntity>> getAuditTrailForSession(String sessionId);
 
-  Future<List<AuditEventEntity>> getRecentAuditEvents({
-    int limit = 100,
-  });
+  Future<List<AuditEventEntity>> getRecentAuditEvents({int limit = 100});
 
   Future<void> addRecordAmendment({
     String? id,
@@ -93,9 +85,7 @@ abstract class RecordRepository {
     required String entityId,
   });
 
-  Future<List<RecordAmendmentEntity>> getAmendmentsForSession(
-    String sessionId,
-  );
+  Future<List<RecordAmendmentEntity>> getAmendmentsForSession(String sessionId);
 
   Future<List<ExportRecordSummaryEntity>> getExportsForEntity({
     required String entityType,

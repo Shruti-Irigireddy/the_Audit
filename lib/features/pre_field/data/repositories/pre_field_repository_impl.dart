@@ -176,13 +176,18 @@ class PreFieldRepositoryImpl implements PreFieldRepository {
     required String sessionId,
     required String vehicleId,
     String? objective,
+    int quantity = 1,
     required String performedBy,
   }) {
-    _log.t('addVehicleToSession(sessionId: $sessionId, vehicleId: $vehicleId)');
+    _log.t(
+      'addVehicleToSession(sessionId: $sessionId, vehicleId: $vehicleId, '
+      'quantity: $quantity)',
+    );
     return _preFieldDao.addVehicleToSession(
       sessionId: sessionId,
       vehicleId: vehicleId,
       objective: objective,
+      quantity: quantity,
       performedBy: performedBy,
     );
   }

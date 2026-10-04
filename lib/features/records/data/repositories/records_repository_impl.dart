@@ -327,6 +327,20 @@ class RecordRepositoryImpl implements RecordRepository {
     final sessionVehicles = await getSessionVehicles(sessionId);
     final sessionBatteries = await getSessionBatteries(sessionId);
     final equipmentChecks = await getSessionEquipmentChecks(sessionId);
+    final equipmentItems = [
+      for (final item in await _dao.getSessionEquipmentItems(sessionId))
+        SessionEquipmentItemRecordEntity(
+          id: item.id,
+          sessionVehicleId: item.sessionVehicleId,
+          category: item.category,
+          name: item.name,
+          quantity: item.quantity,
+          spares: item.spares,
+          isPacked: item.isPacked,
+          packedAt: item.packedAt,
+          packedBy: item.packedBy,
+        ),
+    ];
     final sorties = await getSortiesForSession(sessionId);
 
     final sortieUsersByFlightId = <String, List<SortieUserWithUserEntity>>{};
@@ -365,6 +379,7 @@ class RecordRepositoryImpl implements RecordRepository {
       sessionVehicles: sessionVehicles,
       sessionBatteries: sessionBatteries,
       equipmentChecks: equipmentChecks,
+      equipmentItems: equipmentItems,
       sorties: sorties,
       sortieUsersByFlightId: sortieUsersByFlightId,
       sortiePayloadsByFlightId: sortiePayloadsByFlightId,

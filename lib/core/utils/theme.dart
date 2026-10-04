@@ -133,6 +133,48 @@ class AppTextStyles {
     fontWeight: FontWeight.w700,
   );
 
+  /// Bold, centred, capitalised category heading in an equipment list
+  /// ("AIRFRAME").
+  static const equipmentCategory = TextStyle(
+    color: AppColors.darkNavy,
+    fontSize: 15,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 1,
+  );
+
+  /// Item name in an equipment list / packing check.
+  static const equipmentItem = TextStyle(
+    color: AppColors.darkNavy,
+    fontSize: 15,
+  );
+
+  /// Quantity / spare numbers in the equipment list.
+  static const equipmentCount = TextStyle(
+    color: AppColors.darkNavy,
+    fontSize: 15,
+    fontWeight: FontWeight.w600,
+  );
+
+  /// An item still not packed, on the review step.
+  static const notPackedItem = TextStyle(
+    color: AppColors.errorRed,
+    fontSize: 15,
+  );
+
+  /// Its count, on the review step.
+  static const notPackedCount = TextStyle(
+    color: AppColors.errorRed,
+    fontSize: 15,
+    fontWeight: FontWeight.w600,
+  );
+
+  /// The count on the packing check: large enough to read outdoors.
+  static const packingCount = TextStyle(
+    color: AppColors.darkNavy,
+    fontSize: 18,
+    fontWeight: FontWeight.w700,
+  );
+
   /// Vehicle name under its image in the carousel.
   static const vehicleName = TextStyle(
     color: AppColors.darkNavy,

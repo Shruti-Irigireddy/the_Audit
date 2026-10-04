@@ -70,6 +70,7 @@ abstract class PreFieldRepository {
     required String sessionId,
     required String vehicleId,
     String? objective,
+    int quantity = 1,
     required String performedBy,
   });
 

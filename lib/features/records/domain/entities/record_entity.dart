@@ -500,17 +500,51 @@ class ExportRecordSummaryEntity {
   });
 }
 
+/// One line of a session's equipment checklist (sessions created with the
+/// per-vehicle lists). Older sessions use [SessionEquipmentCheckWithItemEntity].
+class SessionEquipmentItemRecordEntity {
+  final String id;
+
+  /// Null = Tools.
+  final String? sessionVehicleId;
+  final String category;
+  final String name;
+  final int? quantity;
+  final int? spares;
+  final bool isPacked;
+  final DateTime? packedAt;
+  final String? packedBy;
+
+  const SessionEquipmentItemRecordEntity({
+    required this.id,
+    required this.sessionVehicleId,
+    required this.category,
+    required this.name,
+    required this.quantity,
+    required this.spares,
+    required this.isPacked,
+    required this.packedAt,
+    required this.packedBy,
+  });
+}
+
 class SessionRecordViewEntity {
   final FieldSessionEntity session;
   final List<SessionUserWithUserEntity> sessionUsers;
   final List<SessionVehicleWithVehicleEntity> sessionVehicles;
   final List<SessionBatteryWithBatteryEntity> sessionBatteries;
   final List<SessionEquipmentCheckWithItemEntity> equipmentChecks;
+
+  /// Per-vehicle / Tools checklist (newer sessions); empty for older ones.
+  final List<SessionEquipmentItemRecordEntity> equipmentItems;
   final List<SortieEntity> sorties;
   final Map<String, List<SortieUserWithUserEntity>> sortieUsersByFlightId;
-  final Map<String, List<SortiePayloadWithPayloadEntity>> sortiePayloadsByFlightId;
-  final Map<String, List<SortieBatteryWithBatteryEntity>> sortieBatteriesByFlightId;
-  final Map<String, List<ChecklistResponseWithItemEntity>> checklistResponsesByFlightId;
+  final Map<String, List<SortiePayloadWithPayloadEntity>>
+  sortiePayloadsByFlightId;
+  final Map<String, List<SortieBatteryWithBatteryEntity>>
+  sortieBatteriesByFlightId;
+  final Map<String, List<ChecklistResponseWithItemEntity>>
+  checklistResponsesByFlightId;
   final Map<String, List<ChecklistOverrideEntity>> overridesByFlightId;
   final Map<String, PostFlightNoteEntity?> postFlightNotesByFlightId;
   final List<AuditEventEntity> auditTrail;
@@ -523,6 +557,7 @@ class SessionRecordViewEntity {
     required this.sessionVehicles,
     required this.sessionBatteries,
     required this.equipmentChecks,
+    this.equipmentItems = const [],
     required this.sorties,
     required this.sortieUsersByFlightId,
     required this.sortiePayloadsByFlightId,

@@ -13,6 +13,7 @@ const _uuid = Uuid();
   tables: [
     Payloads,
     PayloadVehicleCompatibility,
+    PayloadVehicles,
     SessionVehiclePayload,
     SortiePayloads,
     AuditEvents,
@@ -127,6 +128,16 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
           ..where((v) => v.payloadId.equals(payloadId))
           ..orderBy([(v) => OrderingTerm.asc(v.vehicleType)]))
         .get();
+  }
+
+  /// Specific vehicles [payloadId] is limited to; empty means no per-vehicle
+  /// limit (its vehicle-type rules apply).
+  Future<List<String>> getLimitedVehicleIds(String payloadId) async {
+    _log.t('getLimitedVehicleIds(payloadId: $payloadId)');
+    final rows = await (select(
+      payloadVehicles,
+    )..where((t) => t.payloadId.equals(payloadId))).get();
+    return [for (final row in rows) row.vehicleId];
   }
 
   Future<List<String>> getCompatibleVehicleTypes(String payloadId) async {

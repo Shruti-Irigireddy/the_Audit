@@ -273,6 +273,24 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
     }).toList();
   }
 
+  /// Newer sessions' equipment checklist (Tools first).
+  Future<List<SessionEquipmentItem>> getSessionEquipmentItems(
+    String sessionId,
+  ) {
+    _log.t('getSessionEquipmentItems(sessionId: $sessionId)');
+    return (select(db.sessionEquipmentItems)
+          ..where((t) => t.sessionId.equals(sessionId))
+          ..orderBy([
+            (t) => OrderingTerm(
+              expression: t.sessionVehicleId,
+              nulls: NullsOrder.first,
+            ),
+            (t) => OrderingTerm.asc(t.categoryOrder),
+            (t) => OrderingTerm.asc(t.sortOrder),
+          ]))
+        .get();
+  }
+
   Future<List<SessionEquipmentCheckWithItem>> getSessionEquipmentChecks(
     String sessionId,
   ) async {
