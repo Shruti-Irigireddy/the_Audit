@@ -21,6 +21,10 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _passwordController = TextEditingController();
 
   bool _isLoading = false;
+  bool _obscurePassword = true;
+
+  /// Only a remembered login is restored automatically on the next launch.
+  bool _rememberMe = false;
   String? _errorMessage;
 
   Future<bool> _login() => _log.trace('login', () async {
@@ -49,6 +53,7 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       await widget.authCubit.saveSession(
+        remember: _rememberMe,
         uid: user.uid,
         email: user.email ?? _emailController.text.trim(),
       );
@@ -230,13 +235,45 @@ class _LoginPageState extends State<LoginPage> {
         _fieldLabel('Password'),
         TextField(
           controller: _passwordController,
-          obscureText: true,
+          obscureText: _obscurePassword,
           textInputAction: TextInputAction.done,
           cursorColor: AppAuthTheme.cursorColor,
           style: AppAuthTheme.fieldText,
-          decoration: AppAuthTheme.field('Enter password'),
+          decoration: AppAuthTheme.field('Enter password').copyWith(
+            suffixIcon: IconButton(
+              onPressed: () =>
+                  setState(() => _obscurePassword = !_obscurePassword),
+              icon: Icon(
+                _obscurePassword
+                    ? Icons.visibility_outlined
+                    : Icons.visibility_off_outlined,
+              ),
+              color: AppAuthTheme.iconColor,
+              tooltip: _obscurePassword ? 'Show password' : 'Hide password',
+            ),
+          ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
+        InkWell(
+          onTap: () => setState(() => _rememberMe = !_rememberMe),
+          borderRadius: const BorderRadius.all(Radius.circular(8)),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Checkbox(
+                value: _rememberMe,
+                onChanged: (value) =>
+                    setState(() => _rememberMe = value ?? false),
+                side: const BorderSide(color: AppAuthTheme.iconColor),
+                activeColor: AppAuthTheme.checkboxFill,
+                checkColor: AppColors.darkNavy,
+              ),
+              const Text('Remember me', style: AppAuthTheme.fieldLabel),
+              const SizedBox(width: 8),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
         if (_errorMessage != null)
           Text(_errorMessage!, style: AppAuthTheme.error),
         const SizedBox(height: 16),

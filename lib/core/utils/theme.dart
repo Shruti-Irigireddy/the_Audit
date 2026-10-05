@@ -312,6 +312,12 @@ class AppAuthTheme {
   );
 
   static const fieldText = TextStyle(color: AppColors.snowWhite);
+
+  /// Password eye toggle and checkbox outline on the dark card.
+  static const iconColor = AppColors.mutedGrey;
+
+  /// Ticked "Remember me" checkbox.
+  static const checkboxFill = AppColors.iceBlue;
   static const cursorColor = AppColors.iceBlue;
   static const error = TextStyle(color: AppColors.errorRed, fontSize: 13);
 

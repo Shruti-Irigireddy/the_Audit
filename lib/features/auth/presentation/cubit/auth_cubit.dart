@@ -49,14 +49,25 @@ class AuthCubit extends Cubit<AuthState> {
     }
   }
 
-  Future<void> saveSession({required String uid, required String email}) async {
-    _log.i('login: ${AppLogger.mask(email)}');
+  /// Signs the user in for this run. Only when [remember] is true is the
+  /// session stored, so the next launch opens straight to home; otherwise any
+  /// previously remembered session is cleared.
+  Future<void> saveSession({
+    required String uid,
+    required String email,
+    bool remember = false,
+  }) async {
+    _log.i('login: ${AppLogger.mask(email)} (remember: $remember)');
     emit(
       state.copyWith(viewStatus: AuthViewStatus.loading, errorMessage: null),
     );
 
     try {
-      await _authStorage.saveSession(uid, email);
+      if (remember) {
+        await _authStorage.saveSession(uid, email);
+      } else {
+        await _authStorage.clearSession();
+      }
       _log.d('session saved');
       emit(
         state.copyWith(
