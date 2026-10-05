@@ -174,6 +174,37 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   /// separate vehicles.
   Set<String> _selectedVehicleIds = {};
 
+  /// Today's objective per selected vehicle (required, FR-PFT-05).
+  final Map<String, TextEditingController> _objectiveControllers = {};
+
+  TextEditingController _objectiveFor(String vehicleId) =>
+      _objectiveControllers.putIfAbsent(vehicleId, TextEditingController.new);
+
+  /// Objectives added per vehicle (one or more each).
+  final Map<String, List<String>> _objectiveLists = {};
+
+  /// A vehicle's objectives, including anything still typed in its field.
+  List<String> _objectivesOf(String vehicleId) {
+    final pending = _objectiveFor(vehicleId).text.trim();
+    return [...?_objectiveLists[vehicleId], if (pending.isNotEmpty) pending];
+  }
+
+  void _addObjective(String vehicleId) {
+    final text = _objectiveFor(vehicleId).text.trim();
+    if (text.isEmpty) return;
+    setState(() {
+      _objectiveLists[vehicleId] = [...?_objectiveLists[vehicleId], text];
+      _objectiveFor(vehicleId).clear();
+    });
+  }
+
+  void _removeObjective(String vehicleId, int index) {
+    setState(() {
+      _objectiveLists[vehicleId] = [...?_objectiveLists[vehicleId]]
+        ..removeAt(index);
+    });
+  }
+
   /// The session's team. PIC and VO are chosen per flight from the crew.
   Set<String> _crewUserIds = {};
   bool _loadingVehicles = true;
@@ -229,6 +260,9 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     _locationController.dispose();
     _latitudeController.dispose();
     _longitudeController.dispose();
+    for (final controller in _objectiveControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -455,9 +489,17 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
       if (_selectedVehicleIds.isEmpty) 'at least one vehicle',
       if (_crewUserIds.isEmpty) 'at least one crew member',
     ];
+    final noObjective = [
+      for (final vehicle in _selectedVehicles)
+        if (_objectivesOf(vehicle.id).isEmpty) vehicle.name,
+    ];
     setState(() => _showSelectionErrors = true);
-    if (missing.isNotEmpty) _showSnack('Select ${missing.join(' and ')}.');
-    final valid = formValid && missing.isEmpty;
+    if (missing.isNotEmpty) {
+      _showSnack('Select ${missing.join(' and ')}.');
+    } else if (noObjective.isNotEmpty) {
+      _showSnack('Enter the objective for ${noObjective.join(', ')}.');
+    }
+    final valid = formValid && missing.isEmpty && noObjective.isEmpty;
     if (!valid) _log.d('step 0 invalid (form: $formValid, missing: $missing)');
     return valid;
   }
@@ -598,6 +640,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           onEditVehicle: _editVehicle,
           onRemoveVehicle: _removeVehicle,
           onAddVehicle: _addVehicle,
+          objectiveFieldFor: _objectiveField,
         ),
         if (_showSelectionErrors && _selectedVehicleIds.isEmpty)
           const _FieldError('Select at least one vehicle.'),
@@ -984,7 +1027,8 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
       for (final vehicle in _vehicles)
         if (_selectedVehicleIds.contains(vehicle.id))
           '${vehicle.name} '
-              '(${_VehicleType.fromDb(vehicle.type)?.label ?? vehicle.type})',
+              '(${_VehicleType.fromDb(vehicle.type)?.label ?? vehicle.type})'
+              '${_objectivesOf(vehicle.id).isEmpty ? '' : ' — ${_objectivesOf(vehicle.id).join('; ')}'}',
     ];
     final crew = [for (final id in _crewUserIds) userName(id)];
     final equipmentKeys = [
@@ -1173,6 +1217,8 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           await cubit.addVehicleToSession(
             sessionId: sessionId,
             vehicleId: vehicleId,
+            // One objective per line.
+            objective: _objectivesOf(vehicleId).join('\n'),
             performedBy: createdBy,
           );
         }
@@ -1559,6 +1605,61 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           ? {..._selectedPayloadIds, payload.payloadId}
           : ({..._selectedPayloadIds}..remove(payload.payloadId));
     });
+  }
+
+  /// Required objective for one selected vehicle (FR-PFT-05).
+  Widget _objectiveField(Vehicle vehicle) {
+    final controller = _objectiveFor(vehicle.id);
+    final added = _objectiveLists[vehicle.id] ?? const <String>[];
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextFormField(
+          key: ValueKey('objective-${vehicle.id}'),
+          controller: controller,
+          textCapitalization: TextCapitalization.sentences,
+          textInputAction: TextInputAction.done,
+          onFieldSubmitted: (_) => _addObjective(vehicle.id),
+          validator: (_) => _objectivesOf(vehicle.id).isEmpty
+              ? 'Add at least one objective'
+              : null,
+          decoration:
+              AppDecorations.field(
+                label: 'Objective',
+                icon: Icons.flag_outlined,
+              ).copyWith(
+                suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: controller,
+                  builder: (context, value, _) => IconButton(
+                    onPressed: value.text.trim().isEmpty
+                        ? null
+                        : () => _addObjective(vehicle.id),
+                    icon: const Icon(Icons.add),
+                    tooltip: 'Add objective',
+                  ),
+                ),
+              ),
+        ),
+        if (added.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (var i = 0; i < added.length; i++)
+                InputChip(
+                  label: Text(added[i]),
+                  onDeleted: () => _removeObjective(vehicle.id, i),
+                  deleteButtonTooltipMessage: 'Remove objective',
+                  visualDensity: VisualDensity.compact,
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
   }
 
   /// Payloads for all selected vehicles together: one chip per payload.
@@ -2878,6 +2979,9 @@ class _VehicleCarouselSection extends StatefulWidget {
   final ValueChanged<Vehicle> onRemoveVehicle;
   final VoidCallback onAddVehicle;
 
+  /// The objective field shown under each selected vehicle.
+  final Widget Function(Vehicle vehicle) objectiveFieldFor;
+
   const _VehicleCarouselSection({
     required this.vehicles,
     required this.selectedIds,
@@ -2886,6 +2990,7 @@ class _VehicleCarouselSection extends StatefulWidget {
     required this.onEditVehicle,
     required this.onRemoveVehicle,
     required this.onAddVehicle,
+    required this.objectiveFieldFor,
   });
 
   @override
@@ -2917,6 +3022,10 @@ class _VehicleCarouselSectionState extends State<_VehicleCarouselSection> {
     // One page per vehicle plus the trailing "Add new vehicle" page.
     final pageCount = vehicles.length + 1;
     final page = _page.clamp(0, pageCount - 1);
+    // The objective editor shows only while a selected vehicle is on screen.
+    final showingSelected =
+        page < vehicles.length &&
+        widget.selectedIds.contains(vehicles[page].id);
     final selected = [
       for (final vehicle in vehicles)
         if (widget.selectedIds.contains(vehicle.id)) vehicle,
@@ -2973,6 +3082,21 @@ class _VehicleCarouselSectionState extends State<_VehicleCarouselSection> {
                       ),
                     ],
                   ),
+                ),
+                // The objective editor for the vehicle on screen, outside the
+                // fixed-height pages so it takes exactly the space it needs
+                // and grows as objectives are added.
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                  alignment: Alignment.topCenter,
+                  child: showingSelected
+                      ? Padding(
+                          key: ValueKey('objectives-${vehicles[page].id}'),
+                          padding: const EdgeInsets.fromLTRB(48, 4, 48, 0),
+                          child: widget.objectiveFieldFor(vehicles[page]),
+                        )
+                      : const SizedBox(width: double.infinity),
                 ),
                 const SizedBox(height: 8),
                 _PageDots(count: pageCount, current: page),
