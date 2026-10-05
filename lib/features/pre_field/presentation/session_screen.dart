@@ -527,7 +527,8 @@ class _SetupPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final picUsers = users.where((item) => item.sessionUser.role == 'PIC');
+    // PIC is chosen per flight from the session's crew (each person once).
+    final picUsers = {for (final item in users) item.user.id: item}.values;
 
     return _Panel(
       children: [

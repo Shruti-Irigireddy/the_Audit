@@ -6,11 +6,13 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:drift/drift.dart' show InsertMode;
 import 'package:uuid/uuid.dart';
 
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/database/dtos/equipment_dtos.dart';
 import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
+import 'package:the_audit/features/auth/data/user_directory.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_state.dart';
 import 'package:the_audit/features/vehicle/domain/dtos/vehicle_dtos.dart';
@@ -43,16 +45,6 @@ enum PreFieldSessionStatus {
   final String dbValue;
 
   const PreFieldSessionStatus(this.label, this.dbValue);
-}
-
-enum _TeamRole {
-  pic('PIC'),
-  vo('VO'),
-  crew('Crew');
-
-  final String label;
-
-  const _TeamRole(this.label);
 }
 
 enum _VehicleType {
@@ -181,10 +173,13 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   /// Vehicles taken. Each vehicle is one unit; several of the same type are
   /// separate vehicles.
   Set<String> _selectedVehicleIds = {};
-  String? _picUserId;
-  String? _voUserId;
+
+  /// The session's team. PIC and VO are chosen per flight from the crew.
   Set<String> _crewUserIds = {};
   bool _loadingVehicles = true;
+
+  /// Set after the first Next/Save on step 1, so missing picks show in red.
+  bool _showSelectionErrors = false;
   bool _loadingUsers = true;
   bool _submitting = false;
   bool _gettingCurrentLocation = false;
@@ -452,11 +447,23 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     }
   }
 
+  /// Step 1 needs its required fields, at least one vehicle and a PIC.
+  /// Shows what's missing and returns false.
+  bool _validateDetails() {
+    final formValid = _formKey.currentState!.validate();
+    final missing = [
+      if (_selectedVehicleIds.isEmpty) 'at least one vehicle',
+      if (_crewUserIds.isEmpty) 'at least one crew member',
+    ];
+    setState(() => _showSelectionErrors = true);
+    if (missing.isNotEmpty) _showSnack('Select ${missing.join(' and ')}.');
+    final valid = formValid && missing.isEmpty;
+    if (!valid) _log.d('step 0 invalid (form: $formValid, missing: $missing)');
+    return valid;
+  }
+
   void _next() {
-    if (_step == 0 && !_formKey.currentState!.validate()) {
-      _log.d('next: step 0 form invalid');
-      return;
-    }
+    if (_step == 0 && !_validateDetails()) return;
     _log.d('next: step $_step -> ${_step + 1}');
     FocusScope.of(context).unfocus();
     setState(() => _step++);
@@ -592,6 +599,8 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           onRemoveVehicle: _removeVehicle,
           onAddVehicle: _addVehicle,
         ),
+        if (_showSelectionErrors && _selectedVehicleIds.isEmpty)
+          const _FieldError('Select at least one vehicle.'),
         if (_selectedVehicleIds.isNotEmpty) ...[
           const SizedBox(height: 12),
           _buildPayloadsSection(),
@@ -602,13 +611,14 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           title: 'Team members',
           users: _users,
           isLoading: _loadingUsers,
-          picUserId: _picUserId,
-          voUserId: _voUserId,
           crewUserIds: _crewUserIds,
-          onAddPic: () => _showTeamMemberDialog(role: _TeamRole.pic),
-          onAddVo: () => _showTeamMemberDialog(role: _TeamRole.vo),
-          onAddCrew: () => _showTeamMemberDialog(role: _TeamRole.crew),
+          onAddCrew: _showCrewDialog,
+          onRemoveCrew: (userId) => setState(() {
+            _crewUserIds = {..._crewUserIds}..remove(userId);
+          }),
         ),
+        if (_showSelectionErrors && _crewUserIds.isEmpty)
+          const _FieldError('Select at least one crew member.'),
       ],
     );
   }
@@ -1033,8 +1043,6 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
                             payload.name,
                       ].join('\n'),
               ),
-              line('PIC', userName(_picUserId)),
-              line('VO', userName(_voUserId)),
               line('Crew', crew.isEmpty ? '—' : crew.join(', ')),
             ],
           ),
@@ -1133,10 +1141,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   /// session (flights); otherwise returns to the home page.
   Future<void> _saveSession({required bool start}) async {
     _log.d(start ? 'start session tapped' : 'save tapped');
-    if (_step == 0 && !_formKey.currentState!.validate()) {
-      _log.d('save: step 0 form invalid');
-      return;
-    }
+    if (_step == 0 && !_validateDetails()) return;
 
     await _log.trace('saveSession', () async {
       final authState = widget.authCubit.state;
@@ -1180,8 +1185,6 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         );
 
         final teamMembers = <({String userId, String role})>[
-          if (_picUserId != null) (userId: _picUserId!, role: 'PIC'),
-          if (_voUserId != null) (userId: _voUserId!, role: 'VO'),
           for (final crewUserId in _crewUserIds)
             (userId: crewUserId, role: 'CREW'),
         ];
@@ -1307,24 +1310,35 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     }
   }
 
+  /// Shows the saved (local) users immediately, then refreshes them from
+  /// Firestore. Offline, the saved list stays.
   Future<void> _loadUsers() async {
     final database = widget.database;
 
-    try {
+    Future<void> showLocal() async {
       final users = await database.preFieldDao.getSelectableUsers();
       _log.d('loaded ${users.length} users');
       if (!mounted) return;
-      setState(() {
-        _users = users;
-        _loadingUsers = false;
-      });
+      setState(() => _users = users);
+    }
+
+    try {
+      await showLocal();
+
+      final directory = UserDirectory(database);
+      final current = firebase_auth.FirebaseAuth.instance.currentUser;
+      if (current != null) await directory.registerSignedInUser(current);
+      try {
+        await directory.syncToLocal();
+      } catch (error, stackTrace) {
+        _log.w('user sync failed; using saved users', error, stackTrace);
+      }
+      await showLocal();
     } catch (error, stackTrace) {
       _log.e('load users failed', error, stackTrace);
-      if (!mounted) return;
-      setState(() => _loadingUsers = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      _showSnack(error.toString());
+    } finally {
+      if (mounted) setState(() => _loadingUsers = false);
     }
   }
 
@@ -1755,22 +1769,18 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     });
   }
 
-  Future<void> _showTeamMemberDialog({required _TeamRole role}) async {
-    _log.d('team picker opened: ${role.label}');
+  Future<void> _showCrewDialog() async {
+    _log.d('crew picker opened');
     final selectedUserIds = await showDialog<Set<String>>(
       context: context,
       builder: (context) {
-        var selectedIds = switch (role) {
-          _TeamRole.pic => {if (_picUserId != null) _picUserId!},
-          _TeamRole.vo => {if (_voUserId != null) _voUserId!},
-          _TeamRole.crew => {..._crewUserIds},
-        };
+        final selectedIds = {..._crewUserIds};
 
         return AlertDialog(
-          title: Text('Select ${role.label}'),
+          title: const Text('Select crew'),
           content: StatefulBuilder(
             builder: (context, setDialogState) {
-              if (_loadingUsers) {
+              if (_loadingUsers && _users.isEmpty) {
                 return const SizedBox(
                   width: 260,
                   child: LinearProgressIndicator(),
@@ -1780,7 +1790,10 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
               if (_users.isEmpty) {
                 return const SizedBox(
                   width: 260,
-                  child: Text('No users found. Add users in admin first.'),
+                  child: Text(
+                    'No users yet. People appear here after they sign in to '
+                    'the app once (or are added in Firestore).',
+                  ),
                 );
               }
 
@@ -1792,22 +1805,13 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
                     for (final user in _users)
                       CheckboxListTile(
                         value: selectedIds.contains(user.id),
-                        onChanged: (value) {
-                          setDialogState(() {
-                            if (role == _TeamRole.crew) {
-                              if (value ?? false) {
-                                selectedIds.add(user.id);
-                              } else {
-                                selectedIds.remove(user.id);
-                              }
-                              return;
-                            }
-
-                            selectedIds = value ?? false ? {user.id} : {};
-                          });
-                        },
+                        onChanged: (value) => setDialogState(() {
+                          value ?? false
+                              ? selectedIds.add(user.id)
+                              : selectedIds.remove(user.id);
+                        }),
                         title: Text(user.name),
-                        subtitle: Text(user.role),
+                        subtitle: Text(user.email),
                         dense: true,
                         contentPadding: EdgeInsets.zero,
                         controlAffinity: ListTileControlAffinity.leading,
@@ -1832,21 +1836,11 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     );
 
     if (selectedUserIds == null) {
-      _log.d('team picker cancelled: ${role.label}');
+      _log.d('crew picker cancelled');
       return;
     }
-    _log.d('team ${role.label} picked: ${selectedUserIds.length} user(s)');
-
-    setState(() {
-      switch (role) {
-        case _TeamRole.pic:
-          _picUserId = selectedUserIds.isEmpty ? null : selectedUserIds.first;
-        case _TeamRole.vo:
-          _voUserId = selectedUserIds.isEmpty ? null : selectedUserIds.first;
-        case _TeamRole.crew:
-          _crewUserIds = selectedUserIds;
-      }
-    });
+    _log.d('crew picked: ${selectedUserIds.length} user(s)');
+    setState(() => _crewUserIds = selectedUserIds);
   }
 
   bool _detailsChanged(Vehicle vehicle, _NewVehicleDraft draft) {
@@ -2133,6 +2127,21 @@ class _NewPayloadDialogState extends State<_NewPayloadDialog> {
         storageCapacity: blankToNull(_storageCapacityController.text),
         vehicleTypes: _types,
       ),
+    );
+  }
+}
+
+/// Red message under a section, like a form field's error text.
+class _FieldError extends StatelessWidget {
+  final String message;
+
+  const _FieldError(this.message);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, left: 4),
+      child: Text(message, style: AppTextStyles.error),
     );
   }
 }
@@ -3302,76 +3311,64 @@ class _TeamMembersSection extends StatelessWidget {
   final String title;
   final List<User> users;
   final bool isLoading;
-  final String? picUserId;
-  final String? voUserId;
   final Set<String> crewUserIds;
-  final VoidCallback onAddPic;
-  final VoidCallback onAddVo;
   final VoidCallback onAddCrew;
+  final ValueChanged<String> onRemoveCrew;
 
   const _TeamMembersSection({
     required this.icon,
     required this.title,
     required this.users,
     required this.isLoading,
-    required this.picUserId,
-    required this.voUserId,
     required this.crewUserIds,
-    required this.onAddPic,
-    required this.onAddVo,
     required this.onAddCrew,
+    required this.onRemoveCrew,
   });
 
   @override
   Widget build(BuildContext context) {
-    final picName = _userName(picUserId);
-    final voName = _userName(voUserId);
-    final crewNames = [
-      for (final userId in crewUserIds) _userName(userId),
-    ].whereType<String>().toList();
+    final crew = [
+      for (final user in users)
+        if (crewUserIds.contains(user.id)) user,
+    ];
 
     return _SectionShell(
       icon: icon,
-      title: title,
-      child: isLoading
-          ? const LinearProgressIndicator()
-          : Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ActionChip(
+      title: crew.isEmpty ? title : '$title (${crew.length})',
+      trailing: IconButton(
+        onPressed: onAddCrew,
+        icon: const Icon(Icons.add),
+        tooltip: 'Add crew',
+        visualDensity: VisualDensity.compact,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (isLoading) ...[
+            const LinearProgressIndicator(),
+            const SizedBox(height: 8),
+          ],
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (crew.isEmpty && !isLoading)
+                const Text(
+                  'No crew yet. Tap + to add.',
+                  style: AppTextStyles.secondary,
+                ),
+              for (final user in crew)
+                InputChip(
                   avatar: const Icon(Icons.person_outline, size: 18),
-                  label: Text(picName == null ? 'PIC' : 'PIC: $picName'),
-                  onPressed: onAddPic,
+                  label: Text(user.name),
+                  onDeleted: () => onRemoveCrew(user.id),
+                  deleteButtonTooltipMessage: 'Remove',
                 ),
-                ActionChip(
-                  avatar: const Icon(Icons.person_outline, size: 18),
-                  label: Text(voName == null ? 'VO' : 'VO: $voName'),
-                  onPressed: onAddVo,
-                ),
-                ActionChip(
-                  avatar: const Icon(Icons.group_add_outlined, size: 18),
-                  label: const Text('Crew'),
-                  onPressed: onAddCrew,
-                ),
-                for (final crewName in crewNames)
-                  Chip(
-                    avatar: const Icon(Icons.person_outline, size: 18),
-                    label: Text('Crew: $crewName'),
-                  ),
-              ],
-            ),
+            ],
+          ),
+        ],
+      ),
     );
-  }
-
-  String? _userName(String? userId) {
-    if (userId == null) return null;
-
-    for (final user in users) {
-      if (user.id == userId) return user.name;
-    }
-
-    return null;
   }
 }
 
@@ -3380,10 +3377,14 @@ class _SectionShell extends StatelessWidget {
   final String title;
   final Widget child;
 
+  /// Optional action at the right of the header (e.g. a + button).
+  final Widget? trailing;
+
   const _SectionShell({
     required this.icon,
     required this.title,
     required this.child,
+    this.trailing,
   });
 
   @override
@@ -3400,6 +3401,7 @@ class _SectionShell extends StatelessWidget {
               Icon(icon, size: 20, color: AppColors.darkNavy),
               const SizedBox(width: 8),
               Expanded(child: Text(title, style: AppTextStyles.sectionHeader)),
+              ?trailing,
             ],
           ),
           const SizedBox(height: 10),

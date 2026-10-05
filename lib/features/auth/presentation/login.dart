@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:flutter/material.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/theme.dart';
+import 'package:the_audit/features/auth/data/user_directory.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 
 const _log = AppLogger('Login');
@@ -51,6 +54,17 @@ class _LoginPageState extends State<LoginPage> {
         });
         return false;
       }
+
+      // Adds/refreshes this person in the team's user list (local now,
+      // Firestore in the background); never holds up sign-in.
+      unawaited(
+        UserDirectory(widget.database)
+            .registerSignedInUser(user)
+            .catchError(
+              (Object error, StackTrace stackTrace) =>
+                  _log.w('user directory update failed', error, stackTrace),
+            ),
+      );
 
       await widget.authCubit.saveSession(
         remember: _rememberMe,

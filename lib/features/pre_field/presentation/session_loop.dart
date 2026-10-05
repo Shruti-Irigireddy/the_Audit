@@ -382,12 +382,13 @@ class _CreateSortieCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final picUsers = state.sessionUsers
-        .where((item) => item.sessionUser.role == 'PIC')
-        .toList();
-    final voUsers = state.sessionUsers
-        .where((item) => item.sessionUser.role == 'VO')
-        .toList();
+    // The session's team is its crew; PIC and VO are chosen per flight from
+    // it. Each person once, even if an older session lists them twice.
+    final crew = {
+      for (final item in state.sessionUsers) item.user.id: item,
+    }.values.toList();
+    final picUsers = crew;
+    final voUsers = crew;
 
     return Card(
       child: Padding(
