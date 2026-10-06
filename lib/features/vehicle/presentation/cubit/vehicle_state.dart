@@ -2,10 +2,9 @@ import 'package:the_audit/features/vehicle/domain/entities/checklist_item_entity
 import 'package:the_audit/features/vehicle/domain/entities/vehicle_checklist_template_entity.dart';
 import 'package:the_audit/features/vehicle/domain/entities/vehicle_entity.dart';
 import 'package:the_audit/features/vehicle/domain/entities/vehicle_with_checklist_entity.dart';
+import 'package:the_audit/features/vehicle/domain/vehicle_type.dart';
 
 enum VehicleStatus { ACTIVE, INACTIVE, MAINTENANCE, RETIRED }
-
-enum VehicleType { MULTIROTOR, VTOL, FIXED_WING }
 
 enum VehicleViewStatus { initial, loading, loaded, saving, failure }
 

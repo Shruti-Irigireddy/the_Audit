@@ -7,7 +7,7 @@ class BlockingChecklistIssueEntity {
   final bool hasOverride;
   final String reason;
 
-  const BlockingChecklistIssueEntity ({
+  const BlockingChecklistIssueEntity({
     required this.checklistItem,
     this.checklistResponse,
     required this.hasOverride,

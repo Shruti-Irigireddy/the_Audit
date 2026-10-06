@@ -19,7 +19,7 @@ class SortieEntity {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  const SortieEntity ({
+  const SortieEntity({
     required this.flightId,
     required this.sessionId,
     required this.sequenceNo,

@@ -6,7 +6,7 @@ class SortiePayloadEntity {
   final String payloadId;
   final DateTime createdAt;
 
-  const SortiePayloadEntity ({
+  const SortiePayloadEntity({
     required this.id,
     required this.flightId,
     required this.payloadId,
@@ -18,7 +18,7 @@ class SortiePayloadWithPayloadEntity {
   final SortiePayloadEntity sortiePayload;
   final PayloadEntity payload;
 
-  const SortiePayloadWithPayloadEntity ({
+  const SortiePayloadWithPayloadEntity({
     required this.sortiePayload,
     required this.payload,
   });

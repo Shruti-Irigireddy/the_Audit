@@ -1076,13 +1076,13 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
         throw Exception('Checklist item does not belong to sortie template.');
       }
 
-      final existingResponse =
-          await (select(db.checklistResponses)..where(
-                (v) => v.flightId.equals(flightId) & v.itemId.equals(itemId),
-              ))
-              .getSingleOrNull();
-
       await transaction(() async {
+        final existingResponse =
+            await (select(db.checklistResponses)..where(
+                  (v) => v.flightId.equals(flightId) & v.itemId.equals(itemId),
+                ))
+                .getSingleOrNull();
+
         if (existingResponse == null) {
           await into(db.checklistResponses).insert(
             ChecklistResponsesCompanion.insert(
@@ -1318,29 +1318,13 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
     final sortie = await _requireSortie(flightId);
 
-    final batteries = await getSortieBatteries(flightId);
-    final checklistItems = await loadChecklistForSortie(flightId);
-
-    final responses = await (select(
-      db.checklistResponses,
-    )..where((v) => v.flightId.equals(flightId))).get();
-
     if (sortie.picUserId.trim().isEmpty) {
       issues.add('PIC is required.');
     }
 
-    if (batteries.isEmpty) {
-      issues.add('At least one battery must be selected.');
-    }
-
-    final responseItemIds = responses.map((r) => r.itemId).toSet();
-
-    for (final item in checklistItems) {
-      if (item.isRequired && !responseItemIds.contains(item.id)) {
-        issues.add('Required checklist item missing: ${item.label}');
-      }
-    }
-
+    // No battery selection (the Power item covers the battery), and only
+    // blocking [A] items decide arming and Go: other items are optional and
+    // may be left blank.
     final readyToArm = await validateReadyToArm(flightId);
 
     if (!readyToArm.canProceed) {
@@ -1363,6 +1347,10 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
     if (normalizedResponse == 'PASS' || normalizedResponse == 'GO') {
       return true;
+    }
+
+    if (normalizedType == 'NUMBER') {
+      return response.valueNumber != null;
     }
 
     if (normalizedType == 'VALUE') {

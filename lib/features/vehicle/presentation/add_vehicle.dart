@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:the_audit/features/vehicle/domain/vehicle_type.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/core/utils/theme.dart';
-
-enum VehicleType { MULTIROTAR, FIXED_WING, VTOL }
 
 enum status { ACTIVE, MAINTENANCE, RETIRED }
 
@@ -73,7 +72,7 @@ class _AddVehicleState extends State<AddVehicle> {
                   items: VehicleType.values.map((VehicleType type) {
                     return DropdownMenuItem<VehicleType>(
                       value: type,
-                      child: Text(type.toString().split('.').last),
+                      child: Text(type.label),
                     );
                   }).toList(),
                   onChanged: (VehicleType? newValue) {

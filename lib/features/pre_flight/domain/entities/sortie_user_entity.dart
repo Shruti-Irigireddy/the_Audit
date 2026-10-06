@@ -7,7 +7,7 @@ class SortieUserEntity {
   final String role;
   final DateTime createdAt;
 
-  const SortieUserEntity ({
+  const SortieUserEntity({
     required this.id,
     required this.flightId,
     required this.userId,
@@ -20,7 +20,7 @@ class SortieUserWithUserEntity {
   final SortieUserEntity sortieUser;
   final UserEntity user;
 
-  const SortieUserWithUserEntity ({
+  const SortieUserWithUserEntity({
     required this.sortieUser,
     required this.user,
   });

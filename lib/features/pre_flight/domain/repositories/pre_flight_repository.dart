@@ -42,7 +42,7 @@ abstract class PreFlightRepository {
     required String performedBy,
   });
 
-  Future<void> removeUserFromSortie ({
+  Future<void> removeUserFromSortie({
     required String flightId,
     required String userId,
     required String role,
@@ -77,7 +77,9 @@ abstract class PreFlightRepository {
     required String performedBy,
   });
 
-  Future<List<SortiePayloadWithPayloadEntity>> getSortiePayloads(String flightId);
+  Future<List<SortiePayloadWithPayloadEntity>> getSortiePayloads(
+    String flightId,
+  );
 
   Future<List<BatteryEntity>> getSelectableBatteriesForSortie(String flightId);
 
@@ -109,7 +111,7 @@ abstract class PreFlightRepository {
     required String batteryId,
     double? voltageStart,
     int? percentStart,
-    required String performedBy, 
+    required String performedBy,
   });
 
   Future<void> removeBatteryFromSortie({
@@ -118,7 +120,9 @@ abstract class PreFlightRepository {
     required String performedBy,
   });
 
-  Future<List<SortieBatteryWithBatteryEntity>> getSortieBatteries(String flightId);
+  Future<List<SortieBatteryWithBatteryEntity>> getSortieBatteries(
+    String flightId,
+  );
 
   Future<BatteryStartDefaults?> getLatestBatteryEndStateAsStartDefault({
     required String batteryId,
@@ -127,7 +131,9 @@ abstract class PreFlightRepository {
 
   Future<List<ChecklistItemEntity>> loadChecklistForSortie(String flightId);
 
-  Future<List<ChecklistItemEntity>> loadBlockingChecklistItemsForSortie(String flightId);
+  Future<List<ChecklistItemEntity>> loadBlockingChecklistItemsForSortie(
+    String flightId,
+  );
 
   Future<void> saveChecklistResponse({
     required String flightId,
@@ -145,13 +151,15 @@ abstract class PreFlightRepository {
     required String createdBy,
   });
 
-  Future<List<ChecklistResponseWithItemEntity>> getChecklistResponsesForFlight(String flightId);
+  Future<List<ChecklistResponseWithItemEntity>> getChecklistResponsesForFlight(
+    String flightId,
+  );
 
   Future<ReadyToArmValidationResultEntity> validateReadyToArm(String flightId);
 
-  Future<List<String>> validatePreflightCompletion (String flightId);
+  Future<List<String>> validatePreflightCompletion(String flightId);
 
-  Future<void> createChecklistOverride ({
+  Future<void> createChecklistOverride({
     required String flightId,
     required String itemId,
     required String overriddenReason,

@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/navbar.dart';
+import 'package:the_audit/core/utils/step_indicator.dart';
 import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:the_audit/features/post_flight/data/repositories/post_flight_repository_impl.dart';
@@ -108,6 +109,16 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 16),
+                  // Flight flow: 1 prepare sortie, 2 pre-flight, 3 post-flight.
+                  // Step 1 goes back to the session loop.
+                  StepIndicator(
+                    current: 2,
+                    count: 3,
+                    onStepTap: (index) {
+                      if (index == 0) Navigator.of(context).pop();
+                    },
                   ),
                   const SizedBox(height: 16),
                   if (state.isLoading) const LinearProgressIndicator(),

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -8,14 +7,17 @@ import 'package:uuid/uuid.dart';
 
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/database/checklists/common_preflight.dart';
 import 'package:the_audit/core/database/dtos/equipment_dtos.dart';
 import 'package:the_audit/core/utils/navbar.dart';
+import 'package:the_audit/core/utils/step_indicator.dart';
 import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/auth/data/user_directory.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_state.dart';
 import 'package:the_audit/features/vehicle/domain/dtos/vehicle_dtos.dart';
+import 'package:the_audit/features/vehicle/presentation/widgets/vehicle_tiles.dart';
 import 'package:the_audit/features/pre_field/data/repositories/pre_field_repository_impl.dart';
 import 'package:the_audit/features/pre_field/presentation/cubit/pre_field_cubit.dart';
 import 'package:the_audit/features/pre_field/presentation/cubit/pre_field_state.dart';
@@ -47,30 +49,6 @@ enum PreFieldSessionStatus {
   const PreFieldSessionStatus(this.label, this.dbValue);
 }
 
-enum _VehicleType {
-  multirotor('Multirotor', 'MULTIROTOR'),
-  vtol('VTOL', 'VTOL'),
-  fixedWing('Fixed wing', 'FIXED_WING');
-
-  final String label;
-  final String dbValue;
-
-  const _VehicleType(this.label, this.dbValue);
-
-  String get imageAsset => switch (this) {
-    _VehicleType.multirotor => 'assets/images/vehicles/multirotor.png',
-    _VehicleType.vtol => 'assets/images/vehicles/vtol.png',
-    _VehicleType.fixedWing => 'assets/images/vehicles/fixed_wing.png',
-  };
-
-  static _VehicleType? fromDb(String value) {
-    for (final type in values) {
-      if (type.dbValue == value.toUpperCase()) return type;
-    }
-    return null;
-  }
-}
-
 const _uuid = Uuid();
 const _log = AppLogger('CreateSession');
 const _dialogLog = AppLogger('VehicleDetailsDialog');
@@ -83,7 +61,7 @@ String _humanize(String dbValue) {
 
 class _NewVehicleDraft {
   final String name;
-  final _VehicleType type;
+  final VehicleType type;
   final String? frameMake;
   final String? frameModel;
   final int? motorCount;
@@ -225,10 +203,26 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   /// Template item ids ticked on the packing check.
   Set<String> _packedItemIds = {};
 
-  /// Which list cards are open on step 2 and on step 3.
-  Set<String> _expandedLists = {};
-  Set<String> _expandedPacking = {};
-  Set<String> _expandedReview = {};
+  /// List cards the user opened or closed on the equipment, packing and
+  /// review steps. By default only the first card (Tools) is open; a key in
+  /// these sets flips its card from that default.
+  Set<String> _toggledLists = {};
+  Set<String> _toggledPacking = {};
+  Set<String> _toggledReview = {};
+
+  /// Whether [key]'s card is open: the first card by default, flipped once
+  /// the user toggles it.
+  bool _isOpen(Set<String> toggled, String key) =>
+      (_equipmentListKeys.isNotEmpty && key == _equipmentListKeys.first) !=
+      toggled.contains(key);
+
+  /// [toggled] with [key]'s card flipped.
+  static Set<String> _flip(Set<String> toggled, String key) =>
+      toggled.contains(key) ? ({...toggled}..remove(key)) : {...toggled, key};
+
+  /// [toggled] with [key]'s card closed.
+  Set<String> _closed(Set<String> toggled, String key) =>
+      _isOpen(toggled, key) ? _flip(toggled, key) : toggled;
 
   /// Active payloads and the vehicle types each fits (empty set = any type).
   List<Payload> _payloads = [];
@@ -354,6 +348,9 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
             child: Form(
               key: _formKey,
               child: ListView(
+                // A new scroll position per step, so each step opens at the
+                // top instead of where the previous step was scrolled to.
+                key: ValueKey('step-$_step'),
                 padding: AppSizes.pageInsets,
                 children: [
                   Row(
@@ -373,7 +370,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  _SessionStepper(
+                  StepIndicator(
                     current: _step,
                     count: _stepTitles.length,
                     onStepTap: (index) {
@@ -670,7 +667,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     if (key == _toolsKey) {
       return const Icon(Icons.handyman_outlined, color: AppColors.darkNavy);
     }
-    final type = _VehicleType.fromDb(_vehicleById(key)?.type ?? '');
+    final type = VehicleType.fromDb(_vehicleById(key)?.type ?? '');
     return type == null
         ? const Icon(Icons.flight, color: AppColors.darkNavy)
         : SizedBox.square(
@@ -714,11 +711,9 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
             leading: _listLeading(key),
             title: key == _toolsKey ? 'Tools · every session' : _listName(key),
             subtitle: '${(_equipmentLists[key] ?? const []).length} items',
-            expanded: _expandedLists.contains(key),
+            expanded: _isOpen(_toggledLists, key),
             onToggle: () => setState(() {
-              _expandedLists = _expandedLists.contains(key)
-                  ? ({..._expandedLists}..remove(key))
-                  : {..._expandedLists, key};
+              _toggledLists = _flip(_toggledLists, key);
             }),
             child: _buildTemplateList(key),
           ),
@@ -920,7 +915,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
       final items = _packableItems(key);
       if (items.isNotEmpty &&
           items.every((item) => _packedItemIds.contains(item.id))) {
-        _expandedPacking = {..._expandedPacking}..remove(key);
+        _toggledPacking = _closed(_toggledPacking, key);
       }
     });
   }
@@ -984,11 +979,9 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
       title: _listName(key),
       subtitle: 'packed $packedCount / ${items.length}',
       done: done,
-      expanded: _expandedPacking.contains(key),
+      expanded: _isOpen(_toggledPacking, key),
       onToggle: () => setState(() {
-        _expandedPacking = _expandedPacking.contains(key)
-            ? ({..._expandedPacking}..remove(key))
-            : {..._expandedPacking, key};
+        _toggledPacking = _flip(_toggledPacking, key);
       }),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1027,7 +1020,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
       for (final vehicle in _vehicles)
         if (_selectedVehicleIds.contains(vehicle.id))
           '${vehicle.name} '
-              '(${_VehicleType.fromDb(vehicle.type)?.label ?? vehicle.type})'
+              '(${VehicleType.fromDb(vehicle.type)?.label ?? vehicle.type})'
               '${_objectivesOf(vehicle.id).isEmpty ? '' : ' — ${_objectivesOf(vehicle.id).join('; ')}'}',
     ];
     final crew = [for (final id in _crewUserIds) userName(id)];
@@ -1132,11 +1125,9 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           : 'packed $packedCount / ${items.length} · '
                 '${notPacked.length} not packed',
       done: notPacked.isEmpty,
-      expanded: _expandedReview.contains(key),
+      expanded: _isOpen(_toggledReview, key),
       onToggle: () => setState(() {
-        _expandedReview = _expandedReview.contains(key)
-            ? ({..._expandedReview}..remove(key))
-            : {..._expandedReview, key};
+        _toggledReview = _flip(_toggledReview, key);
       }),
       child: notPacked.isEmpty
           ? const Text('Everything packed.', style: AppTextStyles.secondary)
@@ -1813,6 +1804,25 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           notes: edited(vehicle.notes, draft.notes),
           performedBy: performedBy,
         );
+        // A new type needs that type's checklist: start a fresh version
+        // (flights keep the version they used).
+        if (draft.type.dbValue != vehicle.type.trim().toUpperCase()) {
+          await widget.database.vehicleDao.createNewChecklistVersionForVehicle(
+            vehicleId: vehicle.id,
+            checklistItems: [
+              for (final item in preflightChecklistFor(draft.type.dbValue))
+                ChecklistItemDraft(
+                  section: item.section,
+                  label: item.label,
+                  responseType: item.responseType,
+                  blocksArming: item.blocksArming,
+                ),
+            ],
+            createdBy: performedBy,
+            deactivationReason: 'Vehicle type changed to ${draft.type.dbValue}',
+          );
+          _log.i('vehicle ${vehicle.id} checklist renewed for new type');
+        }
         _log.i('vehicle ${vehicle.id} edited');
         await _loadVehicles();
       } catch (error, stackTrace) {
@@ -1847,12 +1857,15 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
               defaultFailSafeProfile: draft.defaultFailSafeProfile,
               notes: draft.notes,
               createdByUserId: performedBy,
-              checklistItems: const [
-                ChecklistItemDraft(
-                  section: 'General',
-                  label: 'Visual inspection complete',
-                  responseType: 'PASS_FAIL_NA',
-                ),
+              // Common pre-flight items plus the ones for its type.
+              checklistItems: [
+                for (final item in preflightChecklistFor(draft.type.dbValue))
+                  ChecklistItemDraft(
+                    section: item.section,
+                    label: item.label,
+                    responseType: item.responseType,
+                    blocksArming: item.blocksArming,
+                  ),
               ],
             );
         _log.i('vehicle created $vehicleId (${draft.type.dbValue})');
@@ -2101,7 +2114,7 @@ class _NewPayloadDialogState extends State<_NewPayloadDialog> {
   final _storageTypeController = TextEditingController();
   final _storageCapacityController = TextEditingController();
   late Set<String> _types = widget.initialTypes.isEmpty
-      ? {for (final type in _VehicleType.values) type.dbValue}
+      ? {for (final type in VehicleType.values) type.dbValue}
       : {...widget.initialTypes};
   bool _showTypeError = false;
 
@@ -2183,7 +2196,7 @@ class _NewPayloadDialogState extends State<_NewPayloadDialog> {
                 Wrap(
                   spacing: 8,
                   children: [
-                    for (final type in _VehicleType.values)
+                    for (final type in VehicleType.values)
                       FilterChip(
                         label: Text(type.label),
                         selected: _types.contains(type.dbValue),
@@ -2627,76 +2640,6 @@ class _EquipmentItemDialogState extends State<_EquipmentItemDialog> {
   }
 }
 
-class _SessionStepper extends StatelessWidget {
-  final int current;
-  final int count;
-  final ValueChanged<int> onStepTap;
-
-  const _SessionStepper({
-    required this.current,
-    required this.count,
-    required this.onStepTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        for (var i = 0; i < count; i++) ...[
-          if (i > 0)
-            Expanded(
-              child: Container(
-                height: 2,
-                margin: const EdgeInsets.symmetric(horizontal: 6),
-                color: i <= current ? AppStepper.lineDone : AppStepper.lineTodo,
-              ),
-            ),
-          Semantics(
-            label: 'Step ${i + 1} of $count',
-            selected: i == current,
-            button: i < current,
-            child: GestureDetector(
-              onTap: () => onStepTap(i),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width: 34,
-                height: 34,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: i <= current ? AppStepper.active : AppStepper.todoFill,
-                  border: Border.all(
-                    color: i <= current
-                        ? AppStepper.active
-                        : AppStepper.todoBorder,
-                  ),
-                  boxShadow: i == current
-                      ? const [
-                          BoxShadow(color: AppStepper.glow, blurRadius: 10),
-                        ]
-                      : null,
-                ),
-                child: i < current
-                    ? const Icon(
-                        Icons.check,
-                        size: 18,
-                        color: AppColors.snowWhite,
-                      )
-                    : Text(
-                        '${i + 1}',
-                        style: i == current
-                            ? AppStepper.activeNumber
-                            : AppStepper.todoNumber,
-                      ),
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
 class _DateField extends StatelessWidget {
   final DateTime selectedDate;
 
@@ -2755,9 +2698,8 @@ class _VehicleDetailsDialogState extends State<_VehicleDetailsDialog> {
     text: widget.vehicle?.notes ?? '',
   );
 
-  late _VehicleType _type =
-      _VehicleType.fromDb(widget.vehicle?.type ?? '') ??
-      _VehicleType.multirotor;
+  late VehicleType _type =
+      VehicleType.fromDb(widget.vehicle?.type ?? '') ?? VehicleType.multirotor;
   late String? _frameModel = _blankToNull(widget.vehicle?.frameModel);
 
   bool get _isNew => widget.vehicle == null;
@@ -2835,14 +2777,14 @@ class _VehicleDetailsDialogState extends State<_VehicleDetailsDialog> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                DropdownButtonFormField<_VehicleType>(
+                DropdownButtonFormField<VehicleType>(
                   initialValue: _type,
                   decoration: AppDecorations.field(
                     label: 'Vehicle type',
                     icon: Icons.category_outlined,
                   ),
                   items: [
-                    for (final type in _VehicleType.values)
+                    for (final type in VehicleType.values)
                       DropdownMenuItem(value: type, child: Text(type.label)),
                   ],
                   onChanged: (value) {
@@ -3044,7 +2986,7 @@ class _VehicleCarouselSectionState extends State<_VehicleCarouselSection> {
                   height: 236,
                   child: Row(
                     children: [
-                      _CarouselArrow(
+                      CarouselArrow(
                         icon: Icons.chevron_left,
                         tooltip: 'Previous',
                         onPressed: page > 0 ? () => _goTo(page - 1) : null,
@@ -3073,7 +3015,7 @@ class _VehicleCarouselSectionState extends State<_VehicleCarouselSection> {
                           },
                         ),
                       ),
-                      _CarouselArrow(
+                      CarouselArrow(
                         icon: Icons.chevron_right,
                         tooltip: 'Next',
                         onPressed: page < pageCount - 1
@@ -3099,7 +3041,7 @@ class _VehicleCarouselSectionState extends State<_VehicleCarouselSection> {
                       : const SizedBox(width: double.infinity),
                 ),
                 const SizedBox(height: 8),
-                _PageDots(count: pageCount, current: page),
+                PageDots(count: pageCount, current: page),
                 if (selected.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   Align(
@@ -3110,10 +3052,10 @@ class _VehicleCarouselSectionState extends State<_VehicleCarouselSection> {
                       children: [
                         for (final vehicle in selected)
                           InputChip(
-                            avatar: _VehicleType.fromDb(vehicle.type) == null
+                            avatar: VehicleType.fromDb(vehicle.type) == null
                                 ? const Icon(Icons.flight, size: 18)
                                 : Image.asset(
-                                    _VehicleType.fromDb(
+                                    VehicleType.fromDb(
                                       vehicle.type,
                                     )!.imageAsset,
                                     color: AppColors.darkNavy,
@@ -3128,79 +3070,6 @@ class _VehicleCarouselSectionState extends State<_VehicleCarouselSection> {
                     ),
                   ),
                 ],
-              ],
-            ),
-    );
-  }
-}
-
-/// Dark blue hexagon showing a vehicle type's image (or [icon] when the type
-/// is unknown / for the add card).
-class _VehicleHexTile extends StatelessWidget {
-  final _VehicleType? type;
-  final bool isSelected;
-  final IconData icon;
-
-  const _VehicleHexTile({
-    required this.type,
-    required this.isSelected,
-    this.icon = Icons.flight,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final glyphColor = isSelected
-        ? AppVehicleTile.selectedGlyph
-        : AppVehicleTile.glyph;
-    final image = type?.imageAsset;
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      // Pointy-top regular hexagon: height = width * 2 / sqrt(3).
-      width: 112,
-      height: 129,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 30),
-      decoration: ShapeDecoration(
-        color: isSelected ? AppVehicleTile.selectedFill : AppVehicleTile.fill,
-        shape: _HexagonTileBorder(
-          side: BorderSide(
-            color: isSelected
-                ? AppVehicleTile.selectedBorder
-                : AppVehicleTile.border,
-            width: isSelected ? 2.5 : 1,
-          ),
-        ),
-        shadows: isSelected
-            ? const [
-                BoxShadow(
-                  color: AppVehicleTile.glow,
-                  blurRadius: 22,
-                  spreadRadius: 2,
-                ),
-                BoxShadow(
-                  color: AppVehicleTile.selectedShadow,
-                  blurRadius: 16,
-                  offset: Offset(0, 6),
-                ),
-              ]
-            : null,
-      ),
-      child: image == null
-          ? Icon(icon, size: 44, color: glyphColor)
-          : Stack(
-              fit: StackFit.expand,
-              children: [
-                // Blurred copy of the drawing behind it gives the glow.
-                if (isSelected)
-                  ImageFiltered(
-                    imageFilter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                    child: Image.asset(
-                      image,
-                      color: AppVehicleTile.glyphGlow,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                Image.asset(image, color: glyphColor, fit: BoxFit.contain),
               ],
             ),
     );
@@ -3223,7 +3092,7 @@ class _VehicleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final type = _VehicleType.fromDb(vehicle.type);
+    final type = VehicleType.fromDb(vehicle.type);
     final meta = isSelected
         ? 'SELECTED · TAP TO REMOVE'
         : '${type?.label.toUpperCase() ?? vehicle.type} · TAP TO SELECT';
@@ -3250,7 +3119,7 @@ class _VehicleCard extends StatelessWidget {
               child: GestureDetector(
                 onTap: onTap,
                 behavior: HitTestBehavior.opaque,
-                child: _VehicleHexTile(type: type, isSelected: isSelected),
+                child: VehicleHexTile(type: type, isSelected: isSelected),
               ),
             ),
             // Edit button on the hexagon's upper-right edge.
@@ -3304,128 +3173,12 @@ class _AddVehicleCard extends StatelessWidget {
           children: [
             Text('New vehicle', style: AppTextStyles.vehicleName),
             SizedBox(height: 10),
-            _VehicleHexTile(type: null, isSelected: false, icon: Icons.add),
+            VehicleHexTile(type: null, isSelected: false, icon: Icons.add),
             SizedBox(height: 10),
             Text('TAP TO ADD', style: AppTextStyles.vehicleMeta),
           ],
         ),
       ),
-    );
-  }
-}
-
-/// Pointy-top hexagon outline for the vehicle image tile.
-class _HexagonTileBorder extends ShapeBorder {
-  final BorderSide side;
-
-  const _HexagonTileBorder({this.side = BorderSide.none});
-
-  @override
-  EdgeInsetsGeometry get dimensions => EdgeInsets.all(side.width);
-
-  Path _path(Rect rect) {
-    final cx = rect.center.dx;
-    final quarter = rect.height / 4;
-    return Path()
-      ..moveTo(cx, rect.top)
-      ..lineTo(rect.right, rect.top + quarter)
-      ..lineTo(rect.right, rect.bottom - quarter)
-      ..lineTo(cx, rect.bottom)
-      ..lineTo(rect.left, rect.bottom - quarter)
-      ..lineTo(rect.left, rect.top + quarter)
-      ..close();
-  }
-
-  @override
-  Path getOuterPath(Rect rect, {TextDirection? textDirection}) => _path(rect);
-
-  @override
-  Path getInnerPath(Rect rect, {TextDirection? textDirection}) =>
-      _path(rect.deflate(side.width));
-
-  @override
-  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
-    if (side.style == BorderStyle.none || side.width == 0) return;
-    canvas.drawPath(
-      _path(rect.deflate(side.width / 2)),
-      side.toPaint()..strokeJoin = StrokeJoin.round,
-    );
-  }
-
-  @override
-  ShapeBorder scale(double t) => _HexagonTileBorder(side: side.scale(t));
-
-  @override
-  ShapeBorder? lerpFrom(ShapeBorder? a, double t) => a is _HexagonTileBorder
-      ? _HexagonTileBorder(side: BorderSide.lerp(a.side, side, t))
-      : super.lerpFrom(a, t);
-
-  @override
-  ShapeBorder? lerpTo(ShapeBorder? b, double t) => b is _HexagonTileBorder
-      ? _HexagonTileBorder(side: BorderSide.lerp(side, b.side, t))
-      : super.lerpTo(b, t);
-
-  @override
-  bool operator ==(Object other) =>
-      other is _HexagonTileBorder && other.side == side;
-
-  @override
-  int get hashCode => side.hashCode;
-}
-
-class _CarouselArrow extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback? onPressed;
-
-  const _CarouselArrow({
-    required this.icon,
-    required this.tooltip,
-    required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton.outlined(
-      onPressed: onPressed,
-      tooltip: tooltip,
-      icon: Icon(icon),
-      style: IconButton.styleFrom(
-        side: const BorderSide(color: AppColors.borderStrong),
-      ),
-    );
-  }
-}
-
-class _PageDots extends StatelessWidget {
-  final int count;
-  final int current;
-
-  const _PageDots({required this.count, required this.current});
-
-  @override
-  Widget build(BuildContext context) {
-    if (count <= 1) return const SizedBox.shrink();
-
-    if (count > 8) {
-      return Text('${current + 1} / $count', style: AppTextStyles.caption);
-    }
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        for (var i = 0; i < count; i++)
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            margin: const EdgeInsets.symmetric(horizontal: 3),
-            width: i == current ? 18 : 6,
-            height: 6,
-            decoration: BoxDecoration(
-              color: i == current ? AppColors.darkNavy : AppColors.borderStrong,
-              borderRadius: BorderRadius.circular(3),
-            ),
-          ),
-      ],
     );
   }
 }

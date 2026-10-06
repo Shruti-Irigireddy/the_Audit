@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:the_audit/core/database/app_database.dart';
+import 'package:the_audit/core/database/checklists/common_preflight.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/vehicle/domain/dtos/vehicle_dtos.dart';
 
@@ -523,7 +524,11 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
   }
 
   void _validateChecklistResponseType(String responseType) {
-    const allowedResponseTypes = {'PASS_FAIL_NA', 'VALUE', 'CHECKBOX', 'TEXT'};
+    const allowedResponseTypes = {
+      ...ChecklistResponseTypes.all,
+      'CHECKBOX',
+      'TEXT',
+    };
 
     if (!allowedResponseTypes.contains(responseType)) {
       _log.w('Invalid checklist response type: $responseType');

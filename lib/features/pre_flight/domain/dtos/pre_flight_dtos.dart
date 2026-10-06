@@ -51,4 +51,3 @@ class BatteryStartDefaults {
     required this.sourceFlightId,
   });
 }
-

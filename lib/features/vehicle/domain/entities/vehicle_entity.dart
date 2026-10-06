@@ -13,7 +13,7 @@ class VehicleEntity {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  const VehicleEntity ({
+  const VehicleEntity({
     required this.id,
     required this.name,
     required this.type,

@@ -11,7 +11,7 @@ class ChecklistItemEntity {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  const ChecklistItemEntity ({
+  const ChecklistItemEntity({
     required this.id,
     required this.templateId,
     required this.section,

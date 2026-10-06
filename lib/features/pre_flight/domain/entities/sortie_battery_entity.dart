@@ -11,7 +11,7 @@ class SortieBatteryEntity {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  const SortieBatteryEntity ({
+  const SortieBatteryEntity({
     required this.id,
     required this.flightId,
     required this.batteryId,
@@ -20,7 +20,7 @@ class SortieBatteryEntity {
     this.percentStart,
     this.percentEnd,
     required this.createdAt,
-    required this.updatedAt
+    required this.updatedAt,
   });
 }
 
@@ -28,7 +28,7 @@ class SortieBatteryWithBatteryEntity {
   final SortieBatteryEntity sortieBattery;
   final BatteryEntity battery;
 
-  const SortieBatteryWithBatteryEntity ({
+  const SortieBatteryWithBatteryEntity({
     required this.sortieBattery,
     required this.battery,
   });

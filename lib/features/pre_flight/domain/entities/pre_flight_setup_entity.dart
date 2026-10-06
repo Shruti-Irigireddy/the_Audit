@@ -20,7 +20,7 @@ class PreFlightSetupEntity {
   final List<ChecklistResponseWithItemEntity> responses;
   final List<ChecklistOverrideEntity> overrides;
 
-  const PreFlightSetupEntity ({
+  const PreFlightSetupEntity({
     required this.sortie,
     required this.sessionVehicle,
     required this.vehicle,

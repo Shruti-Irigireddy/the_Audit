@@ -10,7 +10,7 @@ class VehicleChecklistTemplateEntity {
   final String? deactivatedBy;
   final String? deactivationReason;
 
-  const VehicleChecklistTemplateEntity ({
+  const VehicleChecklistTemplateEntity({
     required this.id,
     required this.vehicleId,
     required this.version,

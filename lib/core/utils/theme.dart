@@ -18,6 +18,7 @@ class AppColors {
   static const snowWhite = Color(0xFFF7FAFC);
   static const mutedGrey = Color(0xFF8FA1AE);
   static const errorRed = Color(0xFFE53935);
+  static const successGreen = Color(0xFF2E7D32);
   static const cardWhite = Color(0xFFFFFFFF);
 
   // Semantic tokens (steelBlue / black at fixed opacities, kept const).
@@ -118,6 +119,9 @@ class AppTextStyles {
 
   /// Validation / load-failure messages.
   static const error = TextStyle(color: AppColors.errorRed);
+
+  /// Confirmations, e.g. a checklist item that no longer blocks arming.
+  static const success = TextStyle(color: AppColors.successGreen);
 
   /// App bar title.
   static const navTitle = TextStyle(

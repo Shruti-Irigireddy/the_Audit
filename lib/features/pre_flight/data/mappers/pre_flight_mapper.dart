@@ -1,5 +1,6 @@
 import 'package:the_audit/core/database/app_database.dart';
-import 'package:the_audit/core/database/dtos/pre_flight_dtos.dart' as db_pre_flight;
+import 'package:the_audit/core/database/dtos/pre_flight_dtos.dart'
+    as db_pre_flight;
 import 'package:the_audit/core/database/dtos/shared_dtos.dart' as db_shared;
 
 import 'package:the_audit/features/auth/data/mappers/user_mapper.dart';
@@ -23,7 +24,7 @@ import 'package:the_audit/features/pre_flight/domain/entities/sortie_user_entity
 import 'package:the_audit/features/vehicle/domain/entities/checklist_item_entity.dart';
 
 extension SortieDbMapper on Sorty {
-  SortieEntity toEntity(){
+  SortieEntity toEntity() {
     return SortieEntity(
       flightId: flightId,
       sessionId: sessionId,
@@ -43,8 +44,8 @@ extension SortieDbMapper on Sorty {
       decisionBy: decisionBy,
       decisionAt: decisionAt,
       createdAt: createdAt,
-      updatedAt: updatedAt,  
-    );    
+      updatedAt: updatedAt,
+    );
   }
 }
 
@@ -55,13 +56,13 @@ extension SortieUserDbMapper on SortieUser {
       flightId: flightId,
       userId: userId,
       role: role,
-      createdAt: createdAt
+      createdAt: createdAt,
     );
   }
 }
 
 extension SortieUserWithUserDbMapper on db_shared.SortieUserWithUser {
-  SortieUserWithUserEntity toEntity(){
+  SortieUserWithUserEntity toEntity() {
     return SortieUserWithUserEntity(
       sortieUser: sortieUser.toEntity(),
       user: user.toEntity(),
@@ -70,27 +71,28 @@ extension SortieUserWithUserDbMapper on db_shared.SortieUserWithUser {
 }
 
 extension SortiePayloadDbMapper on SortiePayload {
-  SortiePayloadEntity toEntity(){
+  SortiePayloadEntity toEntity() {
     return SortiePayloadEntity(
       id: id,
       flightId: flightId,
       payloadId: payloadId,
-      createdAt: createdAt
+      createdAt: createdAt,
     );
   }
 }
 
-extension SortiePayloadWithPayloadDbMapper on db_shared.SortiePayloadWithPayload {
+extension SortiePayloadWithPayloadDbMapper
+    on db_shared.SortiePayloadWithPayload {
   SortiePayloadWithPayloadEntity toEntity() {
     return SortiePayloadWithPayloadEntity(
       sortiePayload: sortiePayload.toEntity(),
-      payload: payload.toEntity()
+      payload: payload.toEntity(),
     );
   }
 }
 
 extension SortieBatteryDbMapper on SortieBattery {
-  SortieBatteryEntity toEntity(){
+  SortieBatteryEntity toEntity() {
     return SortieBatteryEntity(
       id: id,
       flightId: flightId,
@@ -100,22 +102,23 @@ extension SortieBatteryDbMapper on SortieBattery {
       percentStart: percentStart,
       percentEnd: percentEnd,
       createdAt: createdAt,
-      updatedAt: updatedAt
+      updatedAt: updatedAt,
     );
   }
 }
 
-extension SortieBatteryWithBatteryDbMapper on db_shared.SortieBatteryWithBattery {
-  SortieBatteryWithBatteryEntity toEntity(){
+extension SortieBatteryWithBatteryDbMapper
+    on db_shared.SortieBatteryWithBattery {
+  SortieBatteryWithBatteryEntity toEntity() {
     return SortieBatteryWithBatteryEntity(
       sortieBattery: sortieBattery.toEntity(),
-      battery: battery.toEntity()
+      battery: battery.toEntity(),
     );
   }
 }
 
 extension ChecklistResponseDbMapper on ChecklistResponse {
-  ChecklistResponseEntity toEntity(){
+  ChecklistResponseEntity toEntity() {
     return ChecklistResponseEntity(
       id: id,
       flightId: flightId,
@@ -127,22 +130,23 @@ extension ChecklistResponseDbMapper on ChecklistResponse {
       createdBy: createdBy,
       responseAt: responseAt,
       createdAt: createdAt,
-      updatedAt: updatedAt
+      updatedAt: updatedAt,
     );
   }
 }
 
-extension ChecklistResponseWithItemDbMapper on db_shared.ChecklistResponseWithItem {
-  ChecklistResponseWithItemEntity toEntity(){
+extension ChecklistResponseWithItemDbMapper
+    on db_shared.ChecklistResponseWithItem {
+  ChecklistResponseWithItemEntity toEntity() {
     return ChecklistResponseWithItemEntity(
       checklistResponse: response.toEntity(),
-      checklistItem: item.toEntity()
+      checklistItem: item.toEntity(),
     );
   }
 }
 
 extension ChecklistOverrideDbMapper on ChecklistOverride {
-  ChecklistOverrideEntity toEntity(){
+  ChecklistOverrideEntity toEntity() {
     return ChecklistOverrideEntity(
       id: id,
       flightId: flightId,
@@ -150,24 +154,26 @@ extension ChecklistOverrideDbMapper on ChecklistOverride {
       checklistResponseId: checklistResponseId ?? '',
       overrideReason: overrideReason,
       overriddenBy: overriddenBy,
-      createdAt: createdAt
+      createdAt: createdAt,
     );
   }
 }
 
-extension BlockingChechlistIssueDbMapper on db_pre_flight.BlockingChecklistIssue{
-  BlockingChecklistIssueEntity toEntity(){
+extension BlockingChechlistIssueDbMapper
+    on db_pre_flight.BlockingChecklistIssue {
+  BlockingChecklistIssueEntity toEntity() {
     return BlockingChecklistIssueEntity(
       checklistItem: item.toEntity(),
       checklistResponse: response?.toEntity(),
       hasOverride: hasOverride,
-      reason: reason
+      reason: reason,
     );
   }
 }
 
-extension ReadyToArmValidationResultDbMapper on db_pre_flight.ReadyToArmValidationResult{
-  ReadyToArmValidationResultEntity toEntity(){
+extension ReadyToArmValidationResultDbMapper
+    on db_pre_flight.ReadyToArmValidationResult {
+  ReadyToArmValidationResultEntity toEntity() {
     return ReadyToArmValidationResultEntity(
       canProceed: canProceed,
       missingItems: missingItems.map((item) => item.toEntity()).toList(),
@@ -177,8 +183,8 @@ extension ReadyToArmValidationResultDbMapper on db_pre_flight.ReadyToArmValidati
   }
 }
 
-extension PreFlightSetupDataDbMapper on db_pre_flight.PreFlightSetupData{
-  PreFlightSetupEntity toEntity(){
+extension PreFlightSetupDataDbMapper on db_pre_flight.PreFlightSetupData {
+  PreFlightSetupEntity toEntity() {
     return PreFlightSetupEntity(
       sortie: sortie.toEntity(),
       sessionVehicle: sessionVehicle.toEntity(),
@@ -194,17 +200,17 @@ extension PreFlightSetupDataDbMapper on db_pre_flight.PreFlightSetupData{
 }
 
 extension BatteryStartDefaultDbMapper on db_pre_flight.BatteryStartDefaults {
-  BatteryStartDefaults toDomainDto(){
+  BatteryStartDefaults toDomainDto() {
     return BatteryStartDefaults(
       voltageStart: voltageStart,
       percentStart: percentStart,
-      sourceFlightId: sourceFlightId
+      sourceFlightId: sourceFlightId,
     );
   }
 }
 
-extension PayloadListDbMapper on List<Payload>{
-  List<PayloadEntity> toPayloadEntities(){
+extension PayloadListDbMapper on List<Payload> {
+  List<PayloadEntity> toPayloadEntities() {
     return map((payload) => payload.toEntity()).toList();
   }
 }

@@ -13,7 +13,7 @@ class ChecklistResponseEntity {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  const ChecklistResponseEntity ({
+  const ChecklistResponseEntity({
     required this.id,
     required this.flightId,
     required this.itemId,
@@ -24,7 +24,7 @@ class ChecklistResponseEntity {
     required this.createdBy,
     required this.responseAt,
     required this.createdAt,
-    required this.updatedAt
+    required this.updatedAt,
   });
 }
 
@@ -32,7 +32,7 @@ class ChecklistResponseWithItemEntity {
   final ChecklistResponseEntity checklistResponse;
   final ChecklistItemEntity checklistItem;
 
-  const ChecklistResponseWithItemEntity ({
+  const ChecklistResponseWithItemEntity({
     required this.checklistResponse,
     required this.checklistItem,
   });

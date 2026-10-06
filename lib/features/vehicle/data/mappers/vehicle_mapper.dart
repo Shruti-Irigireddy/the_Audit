@@ -5,7 +5,7 @@ import 'package:the_audit/features/vehicle/domain/entities/vehicle_entity.dart';
 
 extension VehicleDbMapper on Vehicle {
   VehicleEntity toEntity() {
-    return VehicleEntity (
+    return VehicleEntity(
       id: id,
       name: name,
       type: type,
@@ -36,13 +36,13 @@ extension ChecklistItemDbMapper on ChecklistItem {
       sortOrder: sortOrder,
       isActive: isActive,
       createdAt: createdAt,
-      updatedAt: updatedAt
+      updatedAt: updatedAt,
     );
   }
 }
 
 extension VehicleChecklistTemplateDbMapper on VehicleChecklistTemplate {
-  VehicleChecklistTemplateEntity toEntity(){
+  VehicleChecklistTemplateEntity toEntity() {
     return VehicleChecklistTemplateEntity(
       id: id,
       vehicleId: vehicleId,

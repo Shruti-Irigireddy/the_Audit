@@ -2,7 +2,9 @@ import 'package:bloc/bloc.dart';
 
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/pre_flight/domain/dtos/pre_flight_dtos.dart';
+import 'package:the_audit/features/pre_flight/domain/entities/checklist_response_entity.dart';
 import 'package:the_audit/features/pre_flight/domain/repositories/pre_flight_repository.dart';
+import 'package:the_audit/features/vehicle/domain/entities/checklist_item_entity.dart';
 import 'pre_flight_state.dart';
 
 class PreFlightCubit extends Cubit<PreFlightState> {
@@ -551,12 +553,23 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     _log.i(
       'saveChecklistResponse($flightId, item: $itemId, response: $response)',
     );
-    emit(
-      state.copyWith(
-        viewStatus: PreFlightViewStatus.saving,
-        errorMessage: null,
-      ),
+    // Updated in place: the answer shows (and the arming count changes) at
+    // once, with no loading/saving status, so the checklist doesn't redraw
+    // around a focused field or jump while it's being filled in.
+    final previousResponses = state.checklistResponses;
+    final optimistic = _withLocalResponse(
+      previousResponses,
+      flightId: flightId,
+      itemId: itemId,
+      response: response,
+      valueText: valueText,
+      valueNumber: valueNumber,
+      notes: notes,
+      createdBy: createdBy,
     );
+    if (optimistic != null) {
+      emit(state.copyWith(checklistResponses: optimistic, errorMessage: null));
+    }
 
     try {
       await _repository.saveChecklistResponse(
@@ -568,11 +581,82 @@ class PreFlightCubit extends Cubit<PreFlightState> {
         notes: notes,
         createdBy: createdBy,
       );
-      await loadSetup(flightId);
+      // Only the answers and the arming check are re-read, in one emit.
+      final checklistResponses = await _repository
+          .getChecklistResponsesForFlight(flightId);
+      final readyToArmValidation = await _repository.validateReadyToArm(
+        flightId,
+      );
+      final completionIssues = await _repository.validatePreflightCompletion(
+        flightId,
+      );
+      _log.d(
+        'response saved; readyToArm=${readyToArmValidation.canProceed}, '
+        'missing=${readyToArmValidation.missingItems.length}, '
+        'failed=${readyToArmValidation.failedItems.length}',
+      );
+      emit(
+        state.copyWith(
+          viewStatus: PreFlightViewStatus.loaded,
+          checklistResponses: checklistResponses,
+          readyToArmValidation: readyToArmValidation,
+          completionIssues: completionIssues,
+          errorMessage: null,
+        ),
+      );
     } catch (error, stackTrace) {
       _log.e('saveChecklistResponse failed', error, stackTrace);
+      // Put the answer back the way it was; the error shows as a snackbar.
+      emit(state.copyWith(checklistResponses: previousResponses));
       _emitFailure(error);
     }
+  }
+
+  /// [responses] with [itemId]'s answer replaced (or added), or null when the
+  /// item isn't in the loaded checklist.
+  List<ChecklistResponseWithItemEntity>? _withLocalResponse(
+    List<ChecklistResponseWithItemEntity> responses, {
+    required String flightId,
+    required String itemId,
+    required String response,
+    String? valueText,
+    double? valueNumber,
+    String? notes,
+    required String createdBy,
+  }) {
+    ChecklistItemEntity? item;
+    for (final candidate in state.checklistItems) {
+      if (candidate.id == itemId) item = candidate;
+    }
+    if (item == null) return null;
+
+    ChecklistResponseEntity? existing;
+    for (final saved in responses) {
+      if (saved.checklistItem.id == itemId) existing = saved.checklistResponse;
+    }
+    final now = DateTime.now();
+    final updated = ChecklistResponseWithItemEntity(
+      checklistItem: item,
+      checklistResponse: ChecklistResponseEntity(
+        id: existing?.id ?? 'pending-$itemId',
+        flightId: flightId,
+        itemId: itemId,
+        response: response,
+        valueText: valueText,
+        valueNumber: valueNumber,
+        notes: notes,
+        createdBy: existing?.createdBy ?? createdBy,
+        responseAt: now,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      ),
+    );
+
+    return [
+      for (final saved in responses)
+        if (saved.checklistItem.id != itemId) saved,
+      updated,
+    ];
   }
 
   Future<void> saveChecklistResponses({

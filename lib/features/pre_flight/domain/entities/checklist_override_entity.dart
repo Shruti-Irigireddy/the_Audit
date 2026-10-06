@@ -7,7 +7,7 @@ class ChecklistOverrideEntity {
   final String overriddenBy;
   final DateTime createdAt;
 
-  const ChecklistOverrideEntity ({
+  const ChecklistOverrideEntity({
     required this.id,
     required this.flightId,
     required this.itemId,

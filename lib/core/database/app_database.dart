@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
+import 'package:the_audit/core/database/checklists/common_preflight.dart';
 import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/core/database/sql_log_interceptor.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
@@ -689,7 +690,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 10;
 
   @override
   MigrationStrategy get migration {
@@ -723,8 +724,358 @@ class AppDatabase extends _$AppDatabase {
           await m.createTable(payloadVehicles);
           await _insertDefaultPayloadVehicleLimits();
         }
+        if (from < 7) {
+          // Data only: give every vehicle the common pre-flight checklist.
+          await _upgradeToCommonPreflight();
+        }
+        if (from < 8) {
+          // Data only: add each vehicle's type-specific pre-flight items.
+          await _upgradeToTypePreflight();
+        }
+        if (from < 9) {
+          // Data only: add the Ready-to-Arm gate as every checklist's end.
+          await _appendItemsAsNewChecklistVersion(
+            itemsFor: (_) => readyToArmGateChecklist,
+            reason: 'Ready-to-Arm gate added',
+          );
+        }
+        if (from < 10) {
+          // Data only: the battery start voltage is a number (decimals
+          // allowed). Same question, so existing items are updated in place.
+          await customStatement(
+            "UPDATE checklist_items SET response_type = 'NUMBER' "
+            "WHERE label = 'Battery installed & secured; start voltage logged' "
+            "AND response_type = 'VALUE'",
+          );
+        }
       },
     );
+  }
+
+  /// Adds the SRS §5.1 common pre-flight items to [templateId], from
+  /// [startOrder]. Returns the next free sort order.
+  Future<int> _insertCommonPreflightItems(
+    String templateId,
+    Uuid uuid, {
+    int startOrder = 0,
+  }) => _insertPreflightItems(
+    templateId,
+    uuid,
+    commonPreflightChecklist,
+    startOrder: startOrder,
+  );
+
+  /// Adds [items] to [templateId] from [startOrder]; returns the next free
+  /// sort order.
+  Future<int> _insertPreflightItems(
+    String templateId,
+    Uuid uuid,
+    List<PreflightItem> items, {
+    int startOrder = 0,
+  }) async {
+    var order = startOrder;
+    for (final item in items) {
+      await into(checklistItems).insert(
+        ChecklistItemsCompanion.insert(
+          id: uuid.v4(),
+          templateId: templateId,
+          section: item.section,
+          label: item.label,
+          responseType: item.responseType,
+          blocksArming: Value(item.blocksArming),
+          sortOrder: order++,
+        ),
+      );
+    }
+    return order;
+  }
+
+  /// For each vehicle whose active checklist lacks the common pre-flight
+  /// items: create the next template version (common items, then the
+  /// vehicle's own items except the old "Visual inspection complete"
+  /// placeholder) and retire the old version. Flights keep the version they
+  /// were run against (FR-ADM-03).
+  Future<void> _upgradeToCommonPreflight() async {
+    const uuid = Uuid();
+    await _ensureSystemUser();
+    final marker = commonPreflightChecklist[7].label; // 'GCS connected'
+
+    var upgraded = 0;
+    for (final vehicle in await select(vehicles).get()) {
+      final active =
+          await (select(vehicleChecklistTemplates)
+                ..where(
+                  (t) =>
+                      t.vehicleId.equals(vehicle.id) & t.isActive.equals(true),
+                )
+                ..orderBy([(t) => OrderingTerm.desc(t.version)])
+                ..limit(1))
+              .getSingleOrNull();
+      final oldItems = active == null
+          ? <ChecklistItem>[]
+          : await (select(checklistItems)
+                  ..where((i) => i.templateId.equals(active.id))
+                  ..orderBy([(i) => OrderingTerm.asc(i.sortOrder)]))
+                .get();
+      if (oldItems.any((item) => item.label == marker)) continue;
+
+      final versions = await (select(
+        vehicleChecklistTemplates,
+      )..where((t) => t.vehicleId.equals(vehicle.id))).get();
+      final nextVersion =
+          versions.fold<int>(0, (max, t) => t.version > max ? t.version : max) +
+          1;
+      final templateId = uuid.v4();
+      final now = DateTime.now();
+
+      if (active != null) {
+        await (update(
+          vehicleChecklistTemplates,
+        )..where((t) => t.id.equals(active.id))).write(
+          VehicleChecklistTemplatesCompanion(
+            isActive: const Value(false),
+            deactivatedAt: Value(now),
+            deactivatedBy: const Value(DbUsers.systemUserId),
+            deactivationReason: const Value(
+              'Replaced by the common pre-flight checklist',
+            ),
+            updatedAt: Value(now),
+          ),
+        );
+      }
+      await into(vehicleChecklistTemplates).insert(
+        VehicleChecklistTemplatesCompanion.insert(
+          id: templateId,
+          vehicleId: vehicle.id,
+          version: nextVersion,
+          createdBy: const Value(DbUsers.systemUserId),
+        ),
+      );
+      var order = await _insertCommonPreflightItems(templateId, uuid);
+      for (final item in oldItems) {
+        if (item.label == 'Visual inspection complete') continue;
+        await into(checklistItems).insert(
+          ChecklistItemsCompanion.insert(
+            id: uuid.v4(),
+            templateId: templateId,
+            section: item.section,
+            label: item.label,
+            responseType: item.responseType,
+            isRequired: Value(item.isRequired),
+            blocksArming: Value(item.blocksArming),
+            sortOrder: order++,
+          ),
+        );
+      }
+      await into(auditEvents).insert(
+        AuditEventsCompanion.insert(
+          entityType: DbEntityTypes.vehicle,
+          entityId: vehicle.id,
+          action: DbActions.update,
+          description: Value(
+            'Checklist v$nextVersion: common pre-flight items added',
+          ),
+          performedBy: DbUsers.systemUserId,
+        ),
+      );
+      upgraded++;
+    }
+    const AppLogger(
+      'AppDatabase',
+    ).i('common pre-flight checklist: $upgraded vehicles upgraded');
+  }
+
+  /// For each vehicle whose active checklist lacks its type's items (SRS
+  /// §5.2–5.4): create the next template version with the current items
+  /// plus the type items, and retire the old version. Flights keep the
+  /// version they were run against.
+  Future<void> _upgradeToTypePreflight() async {
+    const uuid = Uuid();
+    await _ensureSystemUser();
+
+    var upgraded = 0;
+    for (final vehicle in await select(vehicles).get()) {
+      final typeItems = typePreflightChecklist(vehicle.type);
+      if (typeItems.isEmpty) continue;
+
+      final active =
+          await (select(vehicleChecklistTemplates)
+                ..where(
+                  (t) =>
+                      t.vehicleId.equals(vehicle.id) & t.isActive.equals(true),
+                )
+                ..orderBy([(t) => OrderingTerm.desc(t.version)])
+                ..limit(1))
+              .getSingleOrNull();
+      if (active == null) continue;
+      final oldItems =
+          await (select(checklistItems)
+                ..where((i) => i.templateId.equals(active.id))
+                ..orderBy([(i) => OrderingTerm.asc(i.sortOrder)]))
+              .get();
+      if (oldItems.any((item) => item.label == typeItems.first.label)) continue;
+
+      final versions = await (select(
+        vehicleChecklistTemplates,
+      )..where((t) => t.vehicleId.equals(vehicle.id))).get();
+      final nextVersion =
+          versions.fold<int>(0, (max, t) => t.version > max ? t.version : max) +
+          1;
+      final templateId = uuid.v4();
+      final now = DateTime.now();
+
+      await (update(
+        vehicleChecklistTemplates,
+      )..where((t) => t.id.equals(active.id))).write(
+        VehicleChecklistTemplatesCompanion(
+          isActive: const Value(false),
+          deactivatedAt: Value(now),
+          deactivatedBy: const Value(DbUsers.systemUserId),
+          deactivationReason: const Value('Replaced: type checklist added'),
+          updatedAt: Value(now),
+        ),
+      );
+      await into(vehicleChecklistTemplates).insert(
+        VehicleChecklistTemplatesCompanion.insert(
+          id: templateId,
+          vehicleId: vehicle.id,
+          version: nextVersion,
+          createdBy: const Value(DbUsers.systemUserId),
+        ),
+      );
+      var order = 0;
+      for (final item in oldItems) {
+        await into(checklistItems).insert(
+          ChecklistItemsCompanion.insert(
+            id: uuid.v4(),
+            templateId: templateId,
+            section: item.section,
+            label: item.label,
+            responseType: item.responseType,
+            isRequired: Value(item.isRequired),
+            blocksArming: Value(item.blocksArming),
+            sortOrder: order++,
+          ),
+        );
+      }
+      await _insertPreflightItems(
+        templateId,
+        uuid,
+        typeItems,
+        startOrder: order,
+      );
+      await into(auditEvents).insert(
+        AuditEventsCompanion.insert(
+          entityType: DbEntityTypes.vehicle,
+          entityId: vehicle.id,
+          action: DbActions.update,
+          description: Value(
+            'Checklist v$nextVersion: ${vehicle.type} items added',
+          ),
+          performedBy: DbUsers.systemUserId,
+        ),
+      );
+      upgraded++;
+    }
+    const AppLogger(
+      'AppDatabase',
+    ).i('type pre-flight checklist: $upgraded vehicles upgraded');
+  }
+
+  /// For each vehicle whose active checklist lacks `itemsFor(vehicle)`
+  /// (checked by its first label): create the next template version with
+  /// the current items plus those items at the end, and retire the old
+  /// version. Flights keep the version they were run against.
+  Future<void> _appendItemsAsNewChecklistVersion({
+    required List<PreflightItem> Function(Vehicle vehicle) itemsFor,
+    required String reason,
+  }) async {
+    const uuid = Uuid();
+    await _ensureSystemUser();
+
+    var upgraded = 0;
+    for (final vehicle in await select(vehicles).get()) {
+      final newItems = itemsFor(vehicle);
+      if (newItems.isEmpty) continue;
+
+      final active =
+          await (select(vehicleChecklistTemplates)
+                ..where(
+                  (t) =>
+                      t.vehicleId.equals(vehicle.id) & t.isActive.equals(true),
+                )
+                ..orderBy([(t) => OrderingTerm.desc(t.version)])
+                ..limit(1))
+              .getSingleOrNull();
+      if (active == null) continue;
+      final oldItems =
+          await (select(checklistItems)
+                ..where((i) => i.templateId.equals(active.id))
+                ..orderBy([(i) => OrderingTerm.asc(i.sortOrder)]))
+              .get();
+      if (oldItems.any((item) => item.label == newItems.first.label)) continue;
+
+      final versions = await (select(
+        vehicleChecklistTemplates,
+      )..where((t) => t.vehicleId.equals(vehicle.id))).get();
+      final nextVersion =
+          versions.fold<int>(0, (max, t) => t.version > max ? t.version : max) +
+          1;
+      final templateId = uuid.v4();
+      final now = DateTime.now();
+
+      await (update(
+        vehicleChecklistTemplates,
+      )..where((t) => t.id.equals(active.id))).write(
+        VehicleChecklistTemplatesCompanion(
+          isActive: const Value(false),
+          deactivatedAt: Value(now),
+          deactivatedBy: const Value(DbUsers.systemUserId),
+          deactivationReason: Value('Replaced: $reason'),
+          updatedAt: Value(now),
+        ),
+      );
+      await into(vehicleChecklistTemplates).insert(
+        VehicleChecklistTemplatesCompanion.insert(
+          id: templateId,
+          vehicleId: vehicle.id,
+          version: nextVersion,
+          createdBy: const Value(DbUsers.systemUserId),
+        ),
+      );
+      var order = 0;
+      for (final item in oldItems) {
+        await into(checklistItems).insert(
+          ChecklistItemsCompanion.insert(
+            id: uuid.v4(),
+            templateId: templateId,
+            section: item.section,
+            label: item.label,
+            responseType: item.responseType,
+            isRequired: Value(item.isRequired),
+            blocksArming: Value(item.blocksArming),
+            sortOrder: order++,
+          ),
+        );
+      }
+      await _insertPreflightItems(
+        templateId,
+        uuid,
+        newItems,
+        startOrder: order,
+      );
+      await into(auditEvents).insert(
+        AuditEventsCompanion.insert(
+          entityType: DbEntityTypes.vehicle,
+          entityId: vehicle.id,
+          action: DbActions.update,
+          description: Value('Checklist v$nextVersion: $reason'),
+          performedBy: DbUsers.systemUserId,
+        ),
+      );
+      upgraded++;
+    }
+    const AppLogger('AppDatabase').i('$reason: $upgraded vehicles upgraded');
   }
 
   /// The reserved author of data the app creates itself.
@@ -1145,15 +1496,10 @@ class AppDatabase extends _$AppDatabase {
           createdBy: const Value(DbUsers.systemUserId),
         ),
       );
-      await into(checklistItems).insert(
-        ChecklistItemsCompanion.insert(
-          id: uuid.v4(),
-          templateId: templateId,
-          section: 'General',
-          label: 'Visual inspection complete',
-          responseType: 'PASS_FAIL_NA',
-          sortOrder: 0,
-        ),
+      await _insertPreflightItems(
+        templateId,
+        uuid,
+        preflightChecklistFor(vehicle.type),
       );
       // No sync_queue row: every install creates these vehicles itself.
       await into(auditEvents).insert(

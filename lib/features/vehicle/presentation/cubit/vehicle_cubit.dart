@@ -4,6 +4,8 @@ import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/vehicle/domain/dtos/vehicle_dtos.dart';
 import 'package:the_audit/features/vehicle/domain/entities/vehicle_entity.dart';
 import 'package:the_audit/features/vehicle/domain/repositories/vehicle_repository.dart';
+import 'package:the_audit/features/vehicle/domain/vehicle_type.dart';
+
 import 'vehicle_state.dart';
 
 class VehicleCubit extends Cubit<VehicleState> {
@@ -132,7 +134,7 @@ class VehicleCubit extends Cubit<VehicleState> {
     required List<ChecklistItemDraft> checklistItems,
   }) async {
     _log.i(
-      'createVehicleWithChecklist(id: $vehicleId, type: ${type.name}, ${checklistItems.length} checklist items)',
+      'createVehicleWithChecklist(id: $vehicleId, type: ${type.dbValue}, ${checklistItems.length} checklist items)',
     );
     emit(
       state.copyWith(viewStatus: VehicleViewStatus.saving, errorMessage: null),
@@ -142,7 +144,7 @@ class VehicleCubit extends Cubit<VehicleState> {
       final id = await _repository.createVehicleWithChecklist(
         vehicleId: vehicleId,
         name: name,
-        type: type.name,
+        type: type.dbValue,
         frameMake: frameMake,
         frameModel: frameModel,
         motorCount: motorCount,
@@ -193,7 +195,7 @@ class VehicleCubit extends Cubit<VehicleState> {
       await _repository.updateVehicle(
         vehicleId: vehicleId,
         name: name,
-        type: type?.name,
+        type: type?.dbValue,
         frameMake: frameMake,
         frameModel: frameModel,
         motorCount: motorCount,

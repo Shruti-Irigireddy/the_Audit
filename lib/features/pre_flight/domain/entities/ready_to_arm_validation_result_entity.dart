@@ -7,7 +7,7 @@ class ReadyToArmValidationResultEntity {
   final List<BlockingChecklistIssueEntity> failedItems;
   final List<ChecklistOverrideEntity> overrides;
 
-  const ReadyToArmValidationResultEntity ({
+  const ReadyToArmValidationResultEntity({
     required this.canProceed,
     required this.missingItems,
     required this.failedItems,

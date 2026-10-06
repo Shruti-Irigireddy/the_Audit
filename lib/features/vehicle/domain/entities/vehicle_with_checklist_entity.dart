@@ -7,7 +7,7 @@ class VehicleWithChecklistEntity {
   final VehicleChecklistTemplateEntity? activeTemplate;
   final List<ChecklistItemEntity> checklistItems;
 
-  const VehicleWithChecklistEntity ({
+  const VehicleWithChecklistEntity({
     required this.vehicle,
     required this.activeTemplate,
     required this.checklistItems,
