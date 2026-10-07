@@ -1,5 +1,6 @@
 import 'package:bloc/bloc.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/post_flight/domain/dtos/post_flight_dtos.dart';
 import 'package:the_audit/features/post_flight/domain/repositories/post_flight_repository.dart';
@@ -457,7 +458,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
     emit(
       state.copyWith(
         viewStatus: PostFlightViewStatus.failure,
-        errorMessage: error.toString(),
+        errorMessage: friendlyError(error),
       ),
     );
   }

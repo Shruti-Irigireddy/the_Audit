@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 
 import '../../app_database.dart';
@@ -298,7 +299,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
         _log.w(
           'Cannot delete payload $payloadId: used in $usageCount sessions/sorties',
         );
-        throw Exception(
+        throw AppFailure(
           'Cannot delete payload because it is already used in sessions or sorties.',
         );
       }
@@ -392,7 +393,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
 
       if (normalizedVehicleType.isEmpty) {
         _log.w('Vehicle type cannot be empty.');
-        throw Exception('Vehicle type cannot be empty.');
+        throw AppFailure('Vehicle type cannot be empty.');
       }
 
       final existing =
@@ -477,7 +478,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
 
     if (payload == null) {
       _log.w('Payload not found: $payloadId');
-      throw Exception('Payload not found: $payloadId');
+      throw AppFailure('Payload not found: $payloadId');
     }
   }
 

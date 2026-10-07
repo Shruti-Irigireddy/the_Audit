@@ -15,10 +15,70 @@ import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/features/vehicle/domain/entities/checklist_item_entity.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:the_audit/features/pre_flight/data/repositories/pre_flight_repository_impl.dart';
+import 'package:the_audit/features/pre_flight/domain/entities/checklist_response_entity.dart';
 import 'package:the_audit/features/pre_flight/presentation/cubit/pre_flight_cubit.dart';
 import 'package:the_audit/features/pre_flight/presentation/cubit/pre_flight_state.dart';
 
 const _log = AppLogger('PreFlight');
+
+/// Each checklist item's answer and arming state, worked out once per build
+/// instead of searching every saved answer for every item.
+class ChecklistProgress {
+  final Map<String, ChecklistResponseEntity> _saved;
+
+  /// Values as currently typed (item id -> text), not saved yet.
+  final Map<String, String> _typed;
+
+  ChecklistProgress(
+    List<ChecklistResponseWithItemEntity> responses,
+    this._typed,
+  ) : _saved = {
+        for (final saved in responses)
+          saved.checklistItem.id: saved.checklistResponse,
+      };
+
+  String? response(String itemId) => _saved[itemId]?.response;
+
+  /// An item's value as saved in the database, as text.
+  String? savedValue(String itemId) {
+    final saved = _saved[itemId];
+    if (saved == null) return null;
+    if (saved.valueText != null) return saved.valueText;
+    final number = saved.valueNumber;
+    if (number == null) return null;
+    return number == number.roundToDouble()
+        ? number.toInt().toString()
+        : number.toString();
+  }
+
+  /// An item's value (start voltage, sat count / HDOP, RSSI) as text: what's
+  /// typed in the field, else the saved value.
+  String? value(String itemId) => _typed[itemId] ?? savedValue(itemId);
+
+  bool isAnswered(ChecklistItemEntity item) =>
+      response(item.id) != null || (value(item.id) ?? '').isNotEmpty;
+
+  /// A blocking [A] item that hasn't passed yet.
+  bool isBlocking(ChecklistItemEntity item) =>
+      item.blocksArming &&
+      !isCleared(item.responseType, response(item.id), value(item.id));
+
+  /// Whether an answer clears a blocking item (same rule as the database's
+  /// ready-to-arm check): Pass, or a value for value items. Fail, N/A or no
+  /// answer keeps arming blocked.
+  static bool isCleared(String responseType, String? response, String? value) {
+    final answer = response?.trim().toUpperCase();
+    if (answer == 'FAIL' || answer == 'NO_GO') return false;
+    if (answer == 'PASS' || answer == 'GO') return true;
+    if (responseType == ChecklistResponseTypes.number) {
+      return value != null && double.tryParse(value.trim()) != null;
+    }
+    if (responseType == ChecklistResponseTypes.value) {
+      return value != null && value.trim().isNotEmpty;
+    }
+    return false;
+  }
+}
 
 class PreFlightChecklistPage extends StatefulWidget {
   final AppDatabase database;
@@ -61,18 +121,6 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
     for (final item in commonPreflightChecklist) item.section,
   };
 
-  bool _isAnswered(PreFlightState state, ChecklistItemEntity item) =>
-      _responseForItem(state, item.id) != null ||
-      (_valueForItem(state, item.id) ?? '').isNotEmpty;
-
-  bool _isBlocking(PreFlightState state, ChecklistItemEntity item) =>
-      item.blocksArming &&
-      !_isCleared(
-        item.responseType,
-        _responseForItem(state, item.id),
-        _valueForItem(state, item.id),
-      );
-
   void _toggle(String key) => setState(() {
     _openSections = _openSections.contains(key)
         ? ({..._openSections}..remove(key))
@@ -81,7 +129,10 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
 
   /// One card: "Common pre-flight" and the vehicle's checklist, each
   /// collapsible, with their sections collapsible inside.
-  Widget _buildChecklistCard(PreFlightState state) {
+  Widget _buildChecklistCard(
+    PreFlightState state,
+    ChecklistProgress progress,
+  ) {
     final items = state.checklistItems;
     final common = [
       for (final item in items)
@@ -101,7 +152,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
     final gateOpen = [
       ...common,
       ...vehicle,
-    ].every((item) => !_isBlocking(state, item));
+    ].every((item) => !progress.isBlocking(item));
     final vehicleTitle = vehicle.isEmpty
         ? 'Vehicle checklist'
         : 'Vehicle checklist · ${vehicle.first.section}';
@@ -115,9 +166,9 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
       final sections = _sections(groupItems);
       return _ChecklistSection(
         title: title,
-        answered: groupItems.where((i) => _isAnswered(state, i)).length,
+        answered: groupItems.where((i) => progress.isAnswered(i)).length,
         total: groupItems.length,
-        stillBlocking: groupItems.where((i) => _isBlocking(state, i)).length,
+        stillBlocking: groupItems.where((i) => progress.isBlocking(i)).length,
         expanded: _openSections.contains(key),
         onToggle: () => _toggle(key),
         children: [
@@ -132,22 +183,22 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
           // A single-section group (e.g. the vehicle type) shows its items
           // directly; otherwise each section collapses on its own.
           if (!locked && sections.length == 1)
-            for (final item in groupItems) _itemTile(state, item)
+            for (final item in groupItems) _itemTile(progress, item)
           else if (!locked)
             for (final (section, sectionItems) in sections)
               _ChecklistSection(
                 title: section,
                 answered: sectionItems
-                    .where((i) => _isAnswered(state, i))
+                    .where((i) => progress.isAnswered(i))
                     .length,
                 total: sectionItems.length,
                 stillBlocking: sectionItems
-                    .where((i) => _isBlocking(state, i))
+                    .where((i) => progress.isBlocking(i))
                     .length,
                 expanded: _openSections.contains('$key/$section'),
                 onToggle: () => _toggle('$key/$section'),
                 children: [
-                  for (final item in sectionItems) _itemTile(state, item),
+                  for (final item in sectionItems) _itemTile(progress, item),
                 ],
               ),
         ],
@@ -171,22 +222,56 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
     );
   }
 
-  Widget _itemTile(PreFlightState state, ChecklistItemEntity item) {
-    return _ChecklistItemTile(
+  /// Item tiles by item id, reused while nothing they show has changed so
+  /// Flutter skips rebuilding them when another item is answered.
+  final Map<String, _ChecklistItemTile> _tiles = {};
+
+  Widget _itemTile(ChecklistProgress progress, ChecklistItemEntity item) {
+    final response = progress.response(item.id);
+    // The saved value: the field compares against it to know what's new.
+    final value = progress.savedValue(item.id);
+    final cleared = !progress.isBlocking(item) && item.blocksArming;
+
+    final cached = _tiles[item.id];
+    if (cached != null &&
+        cached.label == item.label &&
+        cached.responseType == item.responseType &&
+        cached.blocksArming == item.blocksArming &&
+        cached.response == response &&
+        cached.value == value &&
+        cached.cleared == cleared) {
+      return cached;
+    }
+    return _tiles[item.id] = _ChecklistItemTile(
       key: ValueKey('item-${item.id}'),
       label: item.label,
       // The section is the card's title already.
       section: '',
       responseType: item.responseType,
       blocksArming: item.blocksArming,
-      response: _responseForItem(state, item.id),
-      // The saved value: the field compares against it to know what's new.
-      value: _savedValueForItem(state, item.id),
-      cleared: !_isBlocking(state, item) && item.blocksArming,
+      response: response,
+      value: value,
+      cleared: cleared,
       onResponse: (response, value) =>
           _saveResponse(item.id, response, value: value),
-      onValueChanged: (text) => setState(() => _typedValues[item.id] = text),
+      onValueChanged: (text) => _onValueTyped(item, text),
     );
+  }
+
+  /// Keeps what's typed so the counts follow the field; redraws only when
+  /// the item's answered / passed state flips, not on every keystroke.
+  void _onValueTyped(ChecklistItemEntity item, String text) {
+    ChecklistProgress now() =>
+        ChecklistProgress(_cubit.state.checklistResponses, _typedValues);
+    final before = now();
+    final wasAnswered = before.isAnswered(item);
+    final wasBlocking = before.isBlocking(item);
+    _typedValues[item.id] = text;
+    final after = now();
+    if (after.isAnswered(item) != wasAnswered ||
+        after.isBlocking(item) != wasBlocking) {
+      setState(() {});
+    }
   }
 
   /// Items grouped by section, in checklist order.
@@ -247,11 +332,12 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
           ).showSnackBar(SnackBar(content: Text(state.errorMessage!)));
         },
         builder: (context, state) {
-          // Saving Go already checked ready-to-arm in the database.
-          final status = state.selectedSortie?.flightStatus;
           final goSaved = state.selectedSortie?.finalDecision == 'GO';
-          final canStartFlight = goSaved && status == 'PREFLIGHT';
-          final inFlight = status == 'IN_PROGRESS';
+          // Every item's answer and arming state, looked up once.
+          final progress = ChecklistProgress(
+            state.checklistResponses,
+            _typedValues,
+          );
 
           return Scaffold(
             appBar: const NavBar(),
@@ -297,19 +383,11 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
                         .where((item) => item.blocksArming)
                         .length,
                     stillBlocked: state.checklistItems
-                        .where(
-                          (item) =>
-                              item.blocksArming &&
-                              !_isCleared(
-                                item.responseType,
-                                _responseForItem(state, item.id),
-                                _valueForItem(state, item.id),
-                              ),
-                        )
+                        .where(progress.isBlocking)
                         .length,
                   ),
                   const SizedBox(height: 12),
-                  _buildChecklistCard(state),
+                  _buildChecklistCard(state, progress),
                   const SizedBox(height: 16),
                   // Enabled only when every blocking item (gate included) has
                   // passed; then it runs the final check and opens Go/No-Go.
@@ -318,9 +396,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
                     FilledButton.icon(
                       onPressed:
                           state.isSaving ||
-                              state.checklistItems.any(
-                                (item) => _isBlocking(state, item),
-                              )
+                              state.checklistItems.any(progress.isBlocking)
                           ? null
                           : _readyToArm,
                       icon: const Icon(Icons.verified_user_outlined),
@@ -346,24 +422,6 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
                       },
                       onSubmit: _submitDecision,
                     ),
-                  // Start flight only after Go; Record landing only once the
-                  // flight has started.
-                  if (canStartFlight) ...[
-                    const SizedBox(height: 10),
-                    FilledButton.icon(
-                      onPressed: state.isSaving ? null : _markTakeoff,
-                      icon: const Icon(Icons.flight_takeoff),
-                      label: const Text('Start flight'),
-                    ),
-                  ],
-                  if (inFlight) ...[
-                    const SizedBox(height: 10),
-                    FilledButton.icon(
-                      onPressed: state.isSaving ? null : _recordLanding,
-                      icon: const Icon(Icons.flight_land),
-                      label: const Text('Record landing'),
-                    ),
-                  ],
                   // Detailed issues only after "Validate ready to arm"; the
                   // status bar above already shows what still blocks.
                   if (_showIssues)
@@ -379,36 +437,6 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
         },
       ),
     );
-  }
-
-  String? _responseForItem(PreFlightState state, String itemId) {
-    for (final response in state.checklistResponses) {
-      if (response.checklistItem.id == itemId) {
-        return response.checklistResponse.response;
-      }
-    }
-    return null;
-  }
-
-  /// An item's value (start voltage, sat count / HDOP, RSSI) as text: what's
-  /// typed in the field, else the saved value.
-  String? _valueForItem(PreFlightState state, String itemId) =>
-      _typedValues[itemId] ?? _savedValueForItem(state, itemId);
-
-  /// An item's value as saved in the database, as text.
-  String? _savedValueForItem(PreFlightState state, String itemId) {
-    for (final response in state.checklistResponses) {
-      if (response.checklistItem.id == itemId) {
-        final saved = response.checklistResponse;
-        if (saved.valueText != null) return saved.valueText;
-        final number = saved.valueNumber;
-        if (number == null) return null;
-        return number == number.roundToDouble()
-            ? number.toInt().toString()
-            : number.toString();
-      }
-    }
-    return null;
   }
 
   Future<void> _saveResponse(
@@ -430,22 +458,6 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
     // The cubit re-checks ready-to-arm as part of the same save.
   }
 
-  /// Whether an answer clears a blocking item (same rule as the database's
-  /// ready-to-arm check): Pass, or a value for value items. Fail, N/A or no
-  /// answer keeps arming blocked.
-  static bool _isCleared(String responseType, String? response, String? value) {
-    final answer = response?.trim().toUpperCase();
-    if (answer == 'FAIL' || answer == 'NO_GO') return false;
-    if (answer == 'PASS' || answer == 'GO') return true;
-    if (responseType == ChecklistResponseTypes.number) {
-      return value != null && double.tryParse(value.trim()) != null;
-    }
-    if (responseType == ChecklistResponseTypes.value) {
-      return value != null && value.trim().isNotEmpty;
-    }
-    return false;
-  }
-
   Future<void> _readyToArm() async {
     _log.i('ready to arm tapped');
     setState(() => _showIssues = true);
@@ -462,38 +474,6 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
       );
     }
   }
-
-  Future<void> _markTakeoff() => _log.trace('markTakeoff', () async {
-        _log.i('start flight tapped');
-        final performedBy = await _performedBy();
-        final takeoffAt = await _pickDateTime(title: 'Takeoff time');
-        if (takeoffAt == null) {
-          _log.d('takeoff time cancelled');
-          return;
-        }
-
-        return _cubit.markFlightInProgress(
-          flightId: widget.flightId,
-          takeoffAt: takeoffAt,
-          performedBy: performedBy,
-        );
-      });
-
-  Future<void> _recordLanding() => _log.trace('recordLanding', () async {
-    _log.i('record landing tapped');
-    final performedBy = await _performedBy();
-    final landingAt = await _pickDateTime(title: 'Landing time');
-    if (landingAt == null) {
-      _log.d('landing time cancelled');
-      return;
-    }
-
-    return _cubit.recordLanding(
-      flightId: widget.flightId,
-      landingAt: landingAt,
-      performedBy: performedBy,
-    );
-  });
 
   Future<void> _submitDecision() => _log.trace('submitDecision', () async {
     _log.i(
@@ -530,35 +510,21 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
     );
     if (!mounted || _cubit.state.hasError) return;
 
-    // No-Go aborts the sortie (saved by the database): back to the session.
-    if (isNoGo && _cubit.state.selectedSortie?.flightStatus == 'ABORTED') {
-      _log.i('sortie aborted by No-Go; back to session');
+    // Back to the session: No-Go aborts the sortie, Go makes it Ready for
+    // post-flight (both saved by the database).
+    final status = _cubit.state.selectedSortie?.flightStatus;
+    if (status == 'ABORTED' || status == 'READY') {
+      _log.i('decision saved ($status); back to session');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No-Go saved: sortie aborted.')),
+        SnackBar(
+          content: Text(
+            isNoGo ? 'No-Go saved: sortie aborted.' : 'Go saved: sortie ready.',
+          ),
+        ),
       );
       Navigator.of(context).pop();
     }
   });
-
-  Future<DateTime?> _pickDateTime({required String title}) async {
-    final date = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-      helpText: title,
-    );
-    if (date == null || !mounted) return null;
-
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.now(),
-      helpText: title,
-    );
-    if (time == null) return null;
-
-    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
-  }
 
   String? _nullable(String value) {
     final clean = value.trim();

@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/database/checklists/common_preflight.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
@@ -463,7 +464,7 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
 
     if (vehicle == null) {
       _log.w('Vehicle not found: $vehicleId');
-      throw Exception('Vehicle not found: $vehicleId');
+      throw AppFailure('Vehicle not found: $vehicleId');
     }
 
     return vehicle;
@@ -478,7 +479,7 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
 
     if (template == null) {
       _log.w('Checklist template not found: $templateId');
-      throw Exception('Checklist template not found: $templateId');
+      throw AppFailure('Checklist template not found: $templateId');
     }
 
     return template;
@@ -489,7 +490,7 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
 
     if (!allowedTypes.contains(type)) {
       _log.w('Invalid vehicle type: $type');
-      throw Exception('Invalid vehicle type: $type');
+      throw AppFailure('Invalid vehicle type: $type');
     }
   }
 
@@ -498,25 +499,25 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
 
     if (!allowedStatuses.contains(status)) {
       _log.w('Invalid vehicle status: $status');
-      throw Exception('Invalid vehicle status: $status');
+      throw AppFailure('Invalid vehicle status: $status');
     }
   }
 
   void _validateChecklistItems(List<ChecklistItemDraft> checklistItems) {
     if (checklistItems.isEmpty) {
       _log.w('Vehicle checklist cannot be empty.');
-      throw Exception('Vehicle checklist cannot be empty.');
+      throw AppFailure('Vehicle checklist cannot be empty.');
     }
 
     for (final item in checklistItems) {
       if (item.section.trim().isEmpty) {
         _log.w('Checklist item section cannot be empty.');
-        throw Exception('Checklist item section cannot be empty.');
+        throw AppFailure('Checklist item section cannot be empty.');
       }
 
       if (item.label.trim().isEmpty) {
         _log.w('Checklist item label cannot be empty.');
-        throw Exception('Checklist item label cannot be empty.');
+        throw AppFailure('Checklist item label cannot be empty.');
       }
 
       _validateChecklistResponseType(item.responseType);
@@ -532,7 +533,7 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
 
     if (!allowedResponseTypes.contains(responseType)) {
       _log.w('Invalid checklist response type: $responseType');
-      throw Exception('Invalid checklist response type: $responseType');
+      throw AppFailure('Invalid checklist response type: $responseType');
     }
   }
 

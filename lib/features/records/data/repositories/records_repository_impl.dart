@@ -1,3 +1,4 @@
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/database/daos/records/record_dao.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/records/data/mappers/record_mapper.dart';
@@ -320,7 +321,7 @@ class RecordRepositoryImpl implements RecordRepository {
     final session = await getSessionById(sessionId);
 
     if (session == null) {
-      throw Exception('Session not found: $sessionId');
+      throw AppFailure('Session not found: $sessionId');
     }
 
     final sessionUsers = await getSessionUsers(sessionId);

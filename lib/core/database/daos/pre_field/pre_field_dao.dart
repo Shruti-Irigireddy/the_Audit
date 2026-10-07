@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart';
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/core/database/dtos/pre_field_dtos.dart';
@@ -160,7 +161,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
       if (session.sessionStatus == 'CLOSED') {
         _log.w('Field session is already closed: $sessionId');
-        throw Exception('Field session is already closed: $sessionId');
+        throw AppFailure('Field session is already closed: $sessionId');
       }
 
       final now = DateTime.now();
@@ -252,7 +253,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
       if (sessionUser == null) {
         _log.w('Session user not found: $sessionUserId');
-        throw Exception('Session user not found: $sessionUserId');
+        throw AppFailure('Session user not found: $sessionUserId');
       }
 
       await transaction(() async {
@@ -387,7 +388,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
     );
     if (quantity < 1) {
       _log.w('Vehicle quantity must be at least 1.');
-      throw Exception('Vehicle quantity must be at least 1.');
+      throw AppFailure('Vehicle quantity must be at least 1.');
     }
     return _log.trace('addVehicleToSession', () async {
       await _requireFieldSession(sessionId);
@@ -453,7 +454,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
         _log.w(
           'Cannot remove vehicle from session because it is being used in a sortie.',
         );
-        throw Exception(
+        throw AppFailure(
           'Cannot remove vehicle from session because it is being used in a sortie.',
         );
       }
@@ -543,7 +544,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
         _log.w(
           'Cannot replace session vehicles because sorties already exist.',
         );
-        throw Exception(
+        throw AppFailure(
           'Cannot replace session vehicles because sorties already exist.',
         );
       }
@@ -747,7 +748,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
         _log.w(
           'Payload $payloadId is not assigned to session vehicle $sessionVehicleId.',
         );
-        throw Exception(
+        throw AppFailure(
           'Payload $payloadId is not assigned to session vehicle $sessionVehicleId.',
         );
       }
@@ -992,7 +993,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
       if (sessionBattery == null) {
         _log.w('Session battery not found: $sessionBatteryId');
-        throw Exception('Session battery not found: $sessionBatteryId');
+        throw AppFailure('Session battery not found: $sessionBatteryId');
       }
 
       await transaction(() async {
@@ -1182,7 +1183,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
       if (equipmentCheck == null) {
         _log.w('Equipment check not found: $equipmentCheckId');
-        throw Exception('Equipment check not found: $equipmentCheckId');
+        throw AppFailure('Equipment check not found: $equipmentCheckId');
       }
 
       final now = DateTime.now();
@@ -1426,7 +1427,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
     if (session == null) {
       _log.w('Field session not found: $sessionId');
-      throw Exception('Field session not found: $sessionId');
+      throw AppFailure('Field session not found: $sessionId');
     }
 
     final teamMembers = await getSessionUsers(sessionId);
@@ -1450,7 +1451,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
     if (session == null) {
       _log.w('Field session not found: $sessionId');
-      throw Exception('Field session not found: $sessionId');
+      throw AppFailure('Field session not found: $sessionId');
     }
 
     return session;
@@ -1463,7 +1464,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
     if (user == null) {
       _log.w('User not found: $userId');
-      throw Exception('User not found: $userId');
+      throw AppFailure('User not found: $userId');
     }
 
     return user;
@@ -1476,7 +1477,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
     if (vehicle == null) {
       _log.w('Vehicle not found: $vehicleId');
-      throw Exception('Vehicle not found: $vehicleId');
+      throw AppFailure('Vehicle not found: $vehicleId');
     }
 
     return vehicle;
@@ -1489,7 +1490,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
     if (payload == null) {
       _log.w('Payload not found: $payloadId');
-      throw Exception('Payload not found: $payloadId');
+      throw AppFailure('Payload not found: $payloadId');
     }
 
     return payload;
@@ -1502,7 +1503,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
     if (battery == null) {
       _log.w('Battery not found: $batteryId');
-      throw Exception('Battery not found: $batteryId');
+      throw AppFailure('Battery not found: $batteryId');
     }
 
     return battery;
@@ -1515,7 +1516,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
     if (equipment == null) {
       _log.w('Equipment item not found: $equipmentId');
-      throw Exception('Equipment item not found: $equipmentId');
+      throw AppFailure('Equipment item not found: $equipmentId');
     }
 
     return equipment;
@@ -1528,7 +1529,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
     if (sessionVehicle == null) {
       _log.w('Session vehicle not found: $sessionVehicleId');
-      throw Exception('Session vehicle not found: $sessionVehicleId');
+      throw AppFailure('Session vehicle not found: $sessionVehicleId');
     }
 
     return sessionVehicle;

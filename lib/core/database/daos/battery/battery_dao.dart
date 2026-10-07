@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 
 import '../../app_database.dart';
@@ -191,7 +192,7 @@ class BatteryDao extends DatabaseAccessor<AppDatabase>
 
     if (battery == null) {
       _log.w('Battery not found: $batteryId');
-      throw Exception('Battery not found: $batteryId');
+      throw AppFailure('Battery not found: $batteryId');
     }
 
     return battery;

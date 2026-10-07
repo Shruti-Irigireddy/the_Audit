@@ -1,5 +1,6 @@
 import 'package:bloc/bloc.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/auth/data/auth_storage.dart';
 import 'auth_state.dart';
@@ -43,7 +44,7 @@ class AuthCubit extends Cubit<AuthState> {
       emit(
         state.copyWith(
           viewStatus: AuthViewStatus.failure,
-          errorMessage: error.toString(),
+          errorMessage: friendlyError(error),
         ),
       );
     }
@@ -83,7 +84,7 @@ class AuthCubit extends Cubit<AuthState> {
       emit(
         state.copyWith(
           viewStatus: AuthViewStatus.failure,
-          errorMessage: error.toString(),
+          errorMessage: friendlyError(error),
         ),
       );
     }
@@ -111,7 +112,7 @@ class AuthCubit extends Cubit<AuthState> {
       emit(
         state.copyWith(
           viewStatus: AuthViewStatus.failure,
-          errorMessage: error.toString(),
+          errorMessage: friendlyError(error),
         ),
       );
     }

@@ -1,5 +1,6 @@
 import 'package:bloc/bloc.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/records/domain/entities/record_entity.dart';
 import 'package:the_audit/features/records/domain/repositories/records_repository.dart';
@@ -31,7 +32,7 @@ class RecordsCubit extends Cubit<RecordsState> {
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
-          errorMessage: error.toString(),
+          errorMessage: friendlyError(error),
         ),
       );
     }
@@ -56,7 +57,7 @@ class RecordsCubit extends Cubit<RecordsState> {
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
-          errorMessage: error.toString(),
+          errorMessage: friendlyError(error),
         ),
       );
     }
@@ -81,7 +82,7 @@ class RecordsCubit extends Cubit<RecordsState> {
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
-          errorMessage: error.toString(),
+          errorMessage: friendlyError(error),
         ),
       );
     }
@@ -122,7 +123,7 @@ class RecordsCubit extends Cubit<RecordsState> {
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
-          errorMessage: error.toString(),
+          errorMessage: friendlyError(error),
         ),
       );
     }
@@ -147,7 +148,7 @@ class RecordsCubit extends Cubit<RecordsState> {
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
-          errorMessage: error.toString(),
+          errorMessage: friendlyError(error),
         ),
       );
     }
@@ -177,7 +178,7 @@ class RecordsCubit extends Cubit<RecordsState> {
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
-          errorMessage: error.toString(),
+          errorMessage: friendlyError(error),
         ),
       );
     }
@@ -201,7 +202,7 @@ class RecordsCubit extends Cubit<RecordsState> {
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
-          errorMessage: error.toString(),
+          errorMessage: friendlyError(error),
         ),
       );
     }
@@ -225,7 +226,7 @@ class RecordsCubit extends Cubit<RecordsState> {
       emit(
         state.copyWith(
           status: RecordsStatus.failure,
-          errorMessage: error.toString(),
+          errorMessage: friendlyError(error),
         ),
       );
     }

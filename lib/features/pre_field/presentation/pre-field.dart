@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/features/auth/data/current_user_repository.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/navbar.dart';
@@ -310,7 +311,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
       _log.e('load equipment lists failed', error, stackTrace);
       if (!mounted) return;
       setState(() => _loadingEquipment = false);
-      _showSnack(error.toString());
+      _showSnack(friendlyError(error));
     }
   }
 
@@ -846,7 +847,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         await _loadEquipmentLists();
       } catch (error, stackTrace) {
         _log.e('add equipment item failed', error, stackTrace);
-        _showSnack(error.toString());
+        _showSnack(friendlyError(error));
       }
     });
   }
@@ -891,7 +892,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         await _loadEquipmentLists();
       } catch (error, stackTrace) {
         _log.e('edit equipment item failed', error, stackTrace);
-        _showSnack(error.toString());
+        _showSnack(friendlyError(error));
       }
     });
   }
@@ -1255,7 +1256,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         if (!mounted) return;
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text(error.toString())));
+        ).showSnackBar(SnackBar(content: Text(friendlyError(error))));
       } finally {
         if (mounted) {
           setState(() => _submitting = false);
@@ -1303,7 +1304,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
       setState(() => _loadingVehicles = false);
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      ).showSnackBar(SnackBar(content: Text(friendlyError(error))));
     }
   }
 
@@ -1324,7 +1325,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
       await showLocal();
     } catch (error, stackTrace) {
       _log.e('load users failed', error, stackTrace);
-      _showSnack(error.toString());
+      _showSnack(friendlyError(error));
     } finally {
       if (mounted) setState(() => _loadingUsers = false);
     }
@@ -1432,7 +1433,12 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         }
       } catch (error, stackTrace) {
         _log.e('location capture failed', error, stackTrace);
-        _showSnack(error.toString().replaceFirst('Exception: ', ''));
+        _showSnack(
+          error is TimeoutException
+              ? 'Could not get a GPS fix in time. Try again or type the '
+                    'coordinates.'
+              : friendlyError(error),
+        );
       } finally {
         if (mounted) {
           setState(() => _gettingCurrentLocation = false);
@@ -1641,7 +1647,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         }
       } catch (error, stackTrace) {
         _log.e('add payload failed', error, stackTrace);
-        _showSnack(error.toString());
+        _showSnack(friendlyError(error));
       }
     });
   }
@@ -1691,7 +1697,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         await _loadVehicles();
       } catch (error, stackTrace) {
         _log.e('edit vehicle failed', error, stackTrace);
-        _showSnack(error.toString());
+        _showSnack(friendlyError(error));
       }
     });
   }
@@ -1732,7 +1738,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         });
       } catch (error, stackTrace) {
         _log.e('add vehicle failed', error, stackTrace);
-        _showSnack(error.toString());
+        _showSnack(friendlyError(error));
       }
     });
   }

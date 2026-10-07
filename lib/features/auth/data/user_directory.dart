@@ -31,7 +31,7 @@ class UserDirectory {
       _log.w('signed-in user has no email; not added to the directory');
       return;
     }
-    final name = _displayName(user.displayName, email);
+    final name = displayName(user.displayName, email);
 
     await _saveLocal(id: user.uid, name: name, email: email);
 
@@ -65,7 +65,7 @@ class UserDirectory {
         final data = doc.data();
         final email = (data['email'] as String?)?.trim();
         if (email == null || email.isEmpty) continue;
-        final name = _displayName(data['name'] as String?, email);
+        final name = displayName(data['name'] as String?, email);
         if (await _saveLocal(id: doc.id, name: name, email: email)) saved++;
       }
       _log.i('synced $saved / ${snapshot.docs.length} users from Firestore');
@@ -117,7 +117,7 @@ class UserDirectory {
   }
 
   /// "shruti.k@example.com" -> "Shruti.k" when there's no display name.
-  static String _displayName(String? name, String email) {
+  static String displayName(String? name, String email) {
     final trimmed = name?.trim() ?? '';
     if (trimmed.isNotEmpty) return trimmed;
     final local = email.split('@').first;

@@ -88,10 +88,10 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
           child: BlocBuilder<PreFlightCubit, PreFlightState>(
             builder: (context, flightState) {
               final sorties = flightState.sorties;
-              // A vehicle is busy while one of its sorties hasn't landed yet:
-              // PREFLIGHT, or IN_PROGRESS (taken off). FLOWN (post-flight),
-              // CLOSED and ABORTED free it.
-              const busyStatuses = {'PREFLIGHT', 'IN_PROGRESS'};
+              // A vehicle is busy while one of its sorties is still open:
+              // PREFLIGHT, READY (Go saved, flying until its post-flight is
+              // closed) or IN_PROGRESS. FLOWN, CLOSED and ABORTED free it.
+              const busyStatuses = {'PREFLIGHT', 'READY', 'IN_PROGRESS'};
               final busyVehicleIds = {
                 for (final sortie in sorties)
                   if (busyStatuses.contains(sortie.flightStatus))
@@ -143,10 +143,10 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
                                   )
                                   .map((item) => item.vehicle.name)
                                   .firstOrNull,
-                              // Next step: pre-flight until it has landed
-                              // (take-off and landing are recorded there),
+                              // Next step: pre-flight until Go is saved,
                               // then post-flight notes.
                               onTap: () => switch (sortie.flightStatus) {
+                                'READY' ||
                                 'FLOWN' ||
                                 'CLOSED' => _openPostFlight(sortie.flightId),
                                 _ => _openPreFlight(sortie.flightId),
@@ -750,6 +750,7 @@ class _SortieTile extends StatelessWidget {
   /// (tag, still running?) for a flight status.
   static (String, bool) _tag(String status) => switch (status) {
     'PREFLIGHT' => ('Pre-flight', true),
+    'READY' => ('Ready', true),
     'IN_PROGRESS' => ('In flight', true),
     'FLOWN' => ('Post-flight', true),
     'CLOSED' => ('Ended', false),

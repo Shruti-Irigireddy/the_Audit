@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/database/dtos/shared_dtos.dart';
 import 'package:the_audit/core/database/dtos/post_flight_dtos.dart';
@@ -61,6 +62,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
     final selector = select(db.sorties)
       ..where(
         (v) =>
+            v.flightStatus.equals(_statusReady) |
             v.flightStatus.equals(_statusFlown) |
             v.flightStatus.equals(_statusAborted),
       );
@@ -288,7 +290,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (!_allowedObjectiveResults.contains(normalizedObjectiveResult)) {
         _log.w('Invalid objective result: $objectiveResult');
-        throw Exception('Invalid objective result: $objectiveResult');
+        throw AppFailure('Invalid objective result: $objectiveResult');
       }
 
       final now = DateTime.now();
@@ -346,7 +348,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
       if (normalizedMissionRating != null &&
           !_allowedMissionRatings.contains(normalizedMissionRating)) {
         _log.w('Invalid mission rating: $missionRating');
-        throw Exception('Invalid mission rating: $missionRating');
+        throw AppFailure('Invalid mission rating: $missionRating');
       }
 
       final now = DateTime.now();
@@ -399,7 +401,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
       if (normalizedLogStoredAt != null &&
           !_allowedLogStoredAt.contains(normalizedLogStoredAt)) {
         _log.w('Invalid log storage value: $logStoredAt');
-        throw Exception('Invalid log storage value: $logStoredAt');
+        throw AppFailure('Invalid log storage value: $logStoredAt');
       }
 
       final now = DateTime.now();
@@ -506,7 +508,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (!_allowedFollowUpStatuses.contains(normalizedStatus)) {
         _log.w('Invalid follow-up status: $followUpStatus');
-        throw Exception('Invalid follow-up status: $followUpStatus');
+        throw AppFailure('Invalid follow-up status: $followUpStatus');
       }
 
       final now = DateTime.now();
@@ -571,7 +573,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (sortieBattery == null) {
         _log.w('Battery $batteryId was not selected for this sortie.');
-        throw Exception('Battery $batteryId was not selected for this sortie.');
+        throw AppFailure('Battery $batteryId was not selected for this sortie.');
       }
 
       final now = DateTime.now();
@@ -619,7 +621,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (amendmentText.trim().isEmpty) {
         _log.w('Amendment text cannot be empty.');
-        throw Exception('Amendment text cannot be empty.');
+        throw AppFailure('Amendment text cannot be empty.');
       }
 
       final amendmentId = id ?? _uuid.v4();
@@ -685,7 +687,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
           _log.w(
             'Battery ${battery.batteryId} was not selected for this sortie.',
           );
-          throw Exception(
+          throw AppFailure(
             'Battery ${battery.batteryId} was not selected for this sortie.',
           );
         }
@@ -808,6 +810,10 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
       case _statusAborted:
         return _validateAbortedSortieForClosure(sortie);
 
+      // Go saved, no take-off or landing times recorded.
+      case _statusReady:
+        return [];
+
       case _statusFlown:
         return _validateFlownSortieTimesForClosure(sortie);
 
@@ -852,7 +858,9 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
   bool _canContinueClosureValidation(Sorty sortie, List<String> currentIssues) {
     final status = _normalizeStatus(sortie.flightStatus);
 
-    if (status != _statusFlown && status != _statusAborted) {
+    if (status != _statusReady &&
+        status != _statusFlown &&
+        status != _statusAborted) {
       return false;
     }
 
@@ -873,7 +881,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (check.issues.isNotEmpty) {
         _log.w(check.issues.join('\n'));
-        throw Exception(check.issues.join('\n'));
+        throw AppFailure(check.issues.join('\n'));
       }
 
       final sortie = check.sortie;
@@ -944,7 +952,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
     if (sortie == null) {
       _log.w('Sortie not found: $flightId');
-      throw Exception('Sortie not found: $flightId');
+      throw AppFailure('Sortie not found: $flightId');
     }
 
     return sortie;
@@ -955,7 +963,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
     if (note == null) {
       _log.w('Post-flight note not found for flight: $flightId');
-      throw Exception('Post-flight note not found for flight: $flightId');
+      throw AppFailure('Post-flight note not found for flight: $flightId');
     }
 
     return note;
@@ -966,6 +974,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
     final status = _normalizeStatus(sortie.flightStatus);
 
     switch (status) {
+      case _statusReady:
       case _statusFlown:
       case _statusAborted:
         return;
@@ -974,23 +983,23 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
         _log.w(
           'Sortie is closed. Add an amendment instead of editing directly.',
         );
-        throw Exception(
+        throw AppFailure(
           'Sortie is closed. Add an amendment instead of editing directly.',
         );
 
       case _statusPreflight:
         _log.w('Cannot add post-flight data before flight starts.');
-        throw Exception('Cannot add post-flight data before flight starts.');
+        throw AppFailure('Cannot add post-flight data before flight starts.');
 
       case _statusInProgress:
         _log.w('Record landing or abort the sortie before post-flight.');
-        throw Exception(
+        throw AppFailure(
           'Record landing or abort the sortie before post-flight.',
         );
 
       default:
         _log.w('Invalid sortie status: ${sortie.flightStatus}.');
-        throw Exception('Invalid sortie status: ${sortie.flightStatus}.');
+        throw AppFailure('Invalid sortie status: ${sortie.flightStatus}.');
     }
   }
 
@@ -1006,7 +1015,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
     if (seconds < 0) {
       _log.w('Landing time cannot be before takeoff time.');
-      throw Exception('Landing time cannot be before takeoff time.');
+      throw AppFailure('Landing time cannot be before takeoff time.');
     }
 
     return seconds;
@@ -1071,28 +1080,28 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
   }) {
     if (!_allowedObjectiveResults.contains(objectiveResult)) {
       _log.w('Invalid objective result: $objectiveResult');
-      throw Exception('Invalid objective result: $objectiveResult');
+      throw AppFailure('Invalid objective result: $objectiveResult');
     }
 
     if (missionRating != null &&
         missionRating.isNotEmpty &&
         !_allowedMissionRatings.contains(missionRating)) {
       _log.w('Invalid mission rating: $missionRating');
-      throw Exception('Invalid mission rating: $missionRating');
+      throw AppFailure('Invalid mission rating: $missionRating');
     }
 
     if (logStoredAt != null &&
         logStoredAt.isNotEmpty &&
         !_allowedLogStoredAt.contains(logStoredAt)) {
       _log.w('Invalid log storage value: $logStoredAt');
-      throw Exception('Invalid log storage value: $logStoredAt');
+      throw AppFailure('Invalid log storage value: $logStoredAt');
     }
 
     if (followUpStatus != null &&
         followUpStatus.isNotEmpty &&
         !_allowedFollowUpStatuses.contains(followUpStatus)) {
       _log.w('Invalid follow-up status: $followUpStatus');
-      throw Exception('Invalid follow-up status: $followUpStatus');
+      throw AppFailure('Invalid follow-up status: $followUpStatus');
     }
 
     // Follow-up can be auto-flagged from objective/incident data before the
@@ -1140,17 +1149,17 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
   void _validateBatteryEndState({double? voltageEnd, int? percentEnd}) {
     if (voltageEnd == null && percentEnd == null) {
       _log.w('Battery end voltage or percent is required.');
-      throw Exception('Battery end voltage or percent is required.');
+      throw AppFailure('Battery end voltage or percent is required.');
     }
 
     if (voltageEnd != null && voltageEnd < 0) {
       _log.w('Battery end voltage cannot be negative.');
-      throw Exception('Battery end voltage cannot be negative.');
+      throw AppFailure('Battery end voltage cannot be negative.');
     }
 
     if (percentEnd != null && (percentEnd < 0 || percentEnd > 100)) {
       _log.w('Battery end percent must be between 0 and 100.');
-      throw Exception('Battery end percent must be between 0 and 100.');
+      throw AppFailure('Battery end percent must be between 0 and 100.');
     }
   }
 
@@ -1226,6 +1235,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
   static const String _statusPreflight = 'PREFLIGHT';
   static const String _statusInProgress = 'IN_PROGRESS';
+  static const String _statusReady = 'READY';
   static const String _statusFlown = 'FLOWN';
   static const String _statusAborted = 'ABORTED';
   static const String _statusClosed = 'CLOSED';

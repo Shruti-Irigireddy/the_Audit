@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 
@@ -84,7 +85,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
 
       if (record.exportStatus == 'COMPLETED') {
         _log.w('Cannot restart a completed export: $exportId');
-        throw Exception('Cannot restart a completed export.');
+        throw AppFailure('Cannot restart a completed export.');
       }
 
       await transaction(() async {
@@ -126,7 +127,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
 
       if (exportLocation.trim().isEmpty) {
         _log.w('Export location cannot be empty: $exportId');
-        throw Exception('Export location cannot be empty.');
+        throw AppFailure('Export location cannot be empty.');
       }
 
       await transaction(() async {
@@ -170,7 +171,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
 
       if (errorMessage.trim().isEmpty) {
         _log.w('Export failure reason cannot be empty: $exportId');
-        throw Exception('Export failure reason cannot be empty.');
+        throw AppFailure('Export failure reason cannot be empty.');
       }
 
       await transaction(() async {
@@ -212,7 +213,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
 
       if (record.exportStatus != 'FAILED') {
         _log.w('Only failed exports can be retried: $exportId');
-        throw Exception('Only failed exports can be retried.');
+        throw AppFailure('Only failed exports can be retried.');
       }
 
       await transaction(() async {
@@ -359,7 +360,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
 
     if (record == null) {
       _log.w('Export record not found: $exportId');
-      throw Exception('Export record not found: $exportId');
+      throw AppFailure('Export record not found: $exportId');
     }
 
     return record;
@@ -378,7 +379,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
   void _validateExportFormat(String exportFormat) {
     if (exportFormat != 'PDF' && exportFormat != 'CSV') {
       _log.w('Invalid export format: $exportFormat');
-      throw Exception('Export format must be PDF or CSV.');
+      throw AppFailure('Export format must be PDF or CSV.');
     }
   }
 
@@ -422,12 +423,12 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
               db.postFlightNotes,
             )..where((v) => v.id.equals(entityId))).getSingleOrNull() !=
             null,
-      _ => throw Exception('Unsupported export entity type: $entityType'),
+      _ => throw AppFailure('Unsupported export entity type: $entityType'),
     };
 
     if (!exists) {
       _log.w('Cannot export missing entity: $entityType $entityId');
-      throw Exception('Cannot export missing entity: $entityType $entityId');
+      throw AppFailure('Cannot export missing entity: $entityType $entityId');
     }
   }
 

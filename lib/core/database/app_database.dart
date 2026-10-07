@@ -692,7 +692,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration {
@@ -748,6 +748,14 @@ class AppDatabase extends _$AppDatabase {
             "UPDATE checklist_items SET response_type = 'NUMBER' "
             "WHERE label = 'Battery installed & secured; start voltage logged' "
             "AND response_type = 'VALUE'",
+          );
+        }
+        if (from < 11) {
+          // Data only: a saved Go now makes a sortie READY for post-flight
+          // (take-off and landing are no longer recorded).
+          await customStatement(
+            "UPDATE sorties SET flight_status = 'READY' "
+            "WHERE flight_status = 'PREFLIGHT' AND final_decision = 'GO'",
           );
         }
       },

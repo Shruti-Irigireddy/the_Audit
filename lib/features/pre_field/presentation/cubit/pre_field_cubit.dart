@@ -1,5 +1,6 @@
 import 'package:bloc/bloc.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/pre_field/domain/dtos/pre_field_dtos.dart';
 import 'package:the_audit/features/pre_field/domain/repositories/pre_field_repository.dart';
@@ -743,7 +744,7 @@ class PreFieldCubit extends Cubit<PreFieldState> {
     emit(
       state.copyWith(
         viewStatus: PreFieldViewStatus.failure,
-        errorMessage: error.toString(),
+        errorMessage: friendlyError(error),
       ),
     );
   }

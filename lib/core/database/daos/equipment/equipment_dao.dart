@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 
 import '../../app_database.dart';
@@ -136,7 +137,7 @@ class EquipmentDao extends DatabaseAccessor<AppDatabase>
     if ((category != null && category.trim().isEmpty) ||
         (name != null && name.trim().isEmpty)) {
       _log.w('Equipment item name and category cannot be empty.');
-      throw Exception('Equipment item name and category cannot be empty.');
+      throw AppFailure('Equipment item name and category cannot be empty.');
     }
     _validateCounts(quantity: quantity, spares: spares);
 
@@ -319,7 +320,7 @@ class EquipmentDao extends DatabaseAccessor<AppDatabase>
     )..where((t) => t.id.equals(id))).getSingleOrNull();
     if (item == null) {
       _log.w('Equipment item not found: $id');
-      throw Exception('Equipment item not found: $id');
+      throw AppFailure('Equipment item not found: $id');
     }
     return item;
   }
@@ -332,7 +333,7 @@ class EquipmentDao extends DatabaseAccessor<AppDatabase>
   }) {
     if (category.trim().isEmpty || name.trim().isEmpty) {
       _log.w('Equipment item name and category are required.');
-      throw Exception('Equipment item name and category are required.');
+      throw AppFailure('Equipment item name and category are required.');
     }
     _validateCounts(quantity: quantity, spares: spares);
   }
@@ -340,7 +341,7 @@ class EquipmentDao extends DatabaseAccessor<AppDatabase>
   void _validateCounts({int? quantity, int? spares}) {
     if ((quantity != null && quantity < 0) || (spares != null && spares < 0)) {
       _log.w('Quantity and spares cannot be negative.');
-      throw Exception('Quantity and spares cannot be negative.');
+      throw AppFailure('Quantity and spares cannot be negative.');
     }
   }
 }

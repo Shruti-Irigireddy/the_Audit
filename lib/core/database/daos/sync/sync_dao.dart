@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 
@@ -212,7 +213,7 @@ class SyncDao extends DatabaseAccessor<AppDatabase> with _$SyncDaoMixin {
 
       if (errorMessage.trim().isEmpty) {
         _log.w('Sync failure reason cannot be empty: $syncId');
-        throw Exception('Sync failure reason cannot be empty.');
+        throw AppFailure('Sync failure reason cannot be empty.');
       }
 
       await (update(db.syncQueue)..where((v) => v.id.equals(syncId))).write(
@@ -234,7 +235,7 @@ class SyncDao extends DatabaseAccessor<AppDatabase> with _$SyncDaoMixin {
 
       if (item.syncStatus != 'FAILED') {
         _log.w('Only failed sync items can be retried: $syncId');
-        throw Exception('Only failed sync items can be retried.');
+        throw AppFailure('Only failed sync items can be retried.');
       }
 
       await (update(db.syncQueue)..where((v) => v.id.equals(syncId))).write(
@@ -327,7 +328,7 @@ class SyncDao extends DatabaseAccessor<AppDatabase> with _$SyncDaoMixin {
 
     if (item == null) {
       _log.w('Sync item not found: $syncId');
-      throw Exception('Sync item not found: $syncId');
+      throw AppFailure('Sync item not found: $syncId');
     }
 
     return item;
@@ -351,7 +352,7 @@ class SyncDao extends DatabaseAccessor<AppDatabase> with _$SyncDaoMixin {
         operation != 'UPDATE' &&
         operation != 'DELETE') {
       _log.w('Invalid sync operation: $operation');
-      throw Exception('Sync operation must be INSERT, UPDATE, or DELETE.');
+      throw AppFailure('Sync operation must be INSERT, UPDATE, or DELETE.');
     }
   }
 

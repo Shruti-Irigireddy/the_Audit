@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/database/dtos/pre_flight_dtos.dart';
 import 'package:the_audit/core/database/dtos/shared_dtos.dart';
@@ -64,14 +65,14 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (session == null) {
         _log.w('Field session not found: $sessionId');
-        throw Exception('Field session not found: $sessionId');
+        throw AppFailure('Field session not found: $sessionId');
       }
 
       if (session.sessionStatus == 'CLOSED') {
         _log.w(
           'Field session is closed. Cannot create a sortie in a closed session.',
         );
-        throw Exception(
+        throw AppFailure(
           'Field session is closed. Cannot create a sortie in a closed session.',
         );
       }
@@ -82,12 +83,12 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (sessionVehicle == null) {
         _log.w('Session vehicle not found: $sessionVehicleId');
-        throw Exception('Session vehicle not found: $sessionVehicleId');
+        throw AppFailure('Session vehicle not found: $sessionVehicleId');
       }
 
       if (sessionVehicle.sessionId != sessionId) {
         _log.w('Vehicle was not brought to the selected field session.');
-        throw Exception(
+        throw AppFailure(
           'Vehicle was not brought to the selected field session.',
         );
       }
@@ -110,7 +111,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
           _log.w(
             'Payload $payloadId is not planned for this vehicle or is not compatible.',
           );
-          throw Exception(
+          throw AppFailure(
             'Payload $payloadId is not planned for this vehicle or is not compatible.',
           );
         }
@@ -253,7 +254,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
     if (sessionVehicle == null) {
       _log.w('Session vehicle not found: ${sortie.sessionVehicleId}');
-      throw Exception('Session vehicle not found: ${sortie.sessionVehicleId}');
+      throw AppFailure('Session vehicle not found: ${sortie.sessionVehicleId}');
     }
 
     final vehicle = await (select(
@@ -262,7 +263,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
     if (vehicle == null) {
       _log.w('Vehicle not found: ${sessionVehicle.vehicleId}');
-      throw Exception('Vehicle not found: ${sessionVehicle.vehicleId}');
+      throw AppFailure('Vehicle not found: ${sessionVehicle.vehicleId}');
     }
 
     final checklistItems = await loadChecklistForSortie(flightId);
@@ -452,7 +453,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
     if (sessionVehicle == null) {
       _log.w('Session vehicle not found: ${sortie.sessionVehicleId}');
-      throw Exception('Session vehicle not found: ${sortie.sessionVehicleId}');
+      throw AppFailure('Session vehicle not found: ${sortie.sessionVehicleId}');
     }
 
     final vehicle = await (select(
@@ -461,7 +462,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
     if (vehicle == null) {
       _log.w('Vehicle not found: ${sessionVehicle.vehicleId}');
-      throw Exception('Vehicle not found: ${sessionVehicle.vehicleId}');
+      throw AppFailure('Vehicle not found: ${sessionVehicle.vehicleId}');
     }
 
     final query =
@@ -525,7 +526,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
         _log.w(
           'Payload $payloadId is not planned for this vehicle or is not compatible.',
         );
-        throw Exception(
+        throw AppFailure(
           'Payload $payloadId is not planned for this vehicle or is not compatible.',
         );
       }
@@ -620,7 +621,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
           _log.w(
             'Payload $payloadId is not planned for this vehicle or is not compatible.',
           );
-          throw Exception(
+          throw AppFailure(
             'Payload $payloadId is not planned for this vehicle or is not compatible.',
           );
         }
@@ -875,7 +876,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (existing == null) {
         _log.w('Battery $batteryId is not selected for this sortie.');
-        throw Exception('Battery $batteryId is not selected for this sortie.');
+        throw AppFailure('Battery $batteryId is not selected for this sortie.');
       }
 
       await transaction(() async {
@@ -1068,12 +1069,12 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (item == null) {
         _log.w('Checklist item not found: $itemId');
-        throw Exception('Checklist item not found: $itemId');
+        throw AppFailure('Checklist item not found: $itemId');
       }
 
       if (item.templateId != sortie.checklistTemplateId) {
         _log.w('Checklist item does not belong to sortie template.');
-        throw Exception('Checklist item does not belong to sortie template.');
+        throw AppFailure('Checklist item does not belong to sortie template.');
       }
 
       await transaction(() async {
@@ -1153,12 +1154,12 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
           if (item == null) {
             _log.w('Checklist item not found: ${response.itemId}');
-            throw Exception('Checklist item not found: ${response.itemId}');
+            throw AppFailure('Checklist item not found: ${response.itemId}');
           }
 
           if (item.templateId != sortie.checklistTemplateId) {
             _log.w('Checklist item does not belong to sortie template.');
-            throw Exception(
+            throw AppFailure(
               'Checklist item does not belong to sortie template.',
             );
           }
@@ -1402,17 +1403,17 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (item == null) {
         _log.w('Checklist item not found: $itemId');
-        throw Exception('Checklist item not found: $itemId');
+        throw AppFailure('Checklist item not found: $itemId');
       }
 
       if (item.templateId != sortie.checklistTemplateId) {
         _log.w('Checklist item does not belong to sortie template.');
-        throw Exception('Checklist item does not belong to sortie template.');
+        throw AppFailure('Checklist item does not belong to sortie template.');
       }
 
       if (!item.blocksArming) {
         _log.w('Only blocking checklist items can be overridden.');
-        throw Exception('Only blocking checklist items can be overridden.');
+        throw AppFailure('Only blocking checklist items can be overridden.');
       }
 
       final response =
@@ -1423,14 +1424,14 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (response == null) {
         _log.w('Cannot override an item without a checklist response.');
-        throw Exception(
+        throw AppFailure(
           'Cannot override an item without a checklist response.',
         );
       }
 
       if (_isBlockingResponseSatisfied(item: item, response: response)) {
         _log.w('Cannot override a checklist item that is already satisfied.');
-        throw Exception(
+        throw AppFailure(
           'Cannot override a checklist item that is already satisfied.',
         );
       }
@@ -1443,7 +1444,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (existingOverride != null) {
         _log.w('This checklist item already has an override.');
-        throw Exception('This checklist item already has an override.');
+        throw AppFailure('This checklist item already has an override.');
       }
 
       await transaction(() async {
@@ -1502,13 +1503,13 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (normalizedDecision != 'GO' && normalizedDecision != 'NO_GO') {
         _log.w('Decision must be GO or NO_GO.');
-        throw Exception('Decision must be GO or NO_GO.');
+        throw AppFailure('Decision must be GO or NO_GO.');
       }
 
       if (normalizedDecision == 'NO_GO' &&
           (reason == null || reason.trim().isEmpty)) {
         _log.w('No-Go requires a reason.');
-        throw Exception('No-Go requires a reason.');
+        throw AppFailure('No-Go requires a reason.');
       }
 
       if (normalizedDecision == 'GO') {
@@ -1516,7 +1517,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
         if (issues.isNotEmpty) {
           _log.w(issues.join('\n'));
-          throw Exception(issues.join('\n'));
+          throw AppFailure(issues.join('\n'));
         }
       }
 
@@ -1529,9 +1530,11 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
             decisionReason: Value(reason),
             decisionBy: Value(decisionBy),
             decisionAt: Value(DateTime.now()),
+            // Go: ready for post-flight (take-off and landing aren't
+            // recorded). No-Go: aborted.
             flightStatus: normalizedDecision == 'NO_GO'
                 ? const Value('ABORTED')
-                : const Value('PREFLIGHT'),
+                : const Value('READY'),
             updatedAt: Value(DateTime.now()),
           ),
         );
@@ -1568,34 +1571,34 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (sortie.flightStatus == 'CLOSED') {
         _log.w('Cannot start a closed sortie.');
-        throw Exception('Cannot start a closed sortie.');
+        throw AppFailure('Cannot start a closed sortie.');
       }
 
       if (sortie.flightStatus == 'ABORTED') {
         _log.w('Cannot start an aborted sortie.');
-        throw Exception('Cannot start an aborted sortie.');
+        throw AppFailure('Cannot start an aborted sortie.');
       }
 
       if (sortie.flightStatus == 'IN_PROGRESS') {
         _log.w('Flight is already in progress.');
-        throw Exception('Flight is already in progress.');
+        throw AppFailure('Flight is already in progress.');
       }
 
       if (sortie.flightStatus == 'FLOWN') {
         _log.w('Flight has already been flown.');
-        throw Exception('Flight has already been flown.');
+        throw AppFailure('Flight has already been flown.');
       }
 
       if (sortie.finalDecision != 'GO') {
         _log.w('Cannot start flight without GO decision.');
-        throw Exception('Cannot start flight without GO decision.');
+        throw AppFailure('Cannot start flight without GO decision.');
       }
 
       final issues = await validatePreflightCompletion(flightId);
 
       if (issues.isNotEmpty) {
         _log.w(issues.join('\n'));
-        throw Exception(issues.join('\n'));
+        throw AppFailure(issues.join('\n'));
       }
 
       await transaction(() async {
@@ -1637,7 +1640,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (sortie.flightStatus != 'IN_PROGRESS') {
         _log.w('Cannot record landing unless flight is in progress.');
-        throw Exception('Cannot record landing unless flight is in progress.');
+        throw AppFailure('Cannot record landing unless flight is in progress.');
       }
 
       final resolvedLandingAt = landingAt ?? DateTime.now();
@@ -1645,7 +1648,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
       if (sortie.takeoffAt != null &&
           resolvedLandingAt.isBefore(sortie.takeoffAt!)) {
         _log.w('Landing time cannot be before takeoff time.');
-        throw Exception('Landing time cannot be before takeoff time.');
+        throw AppFailure('Landing time cannot be before takeoff time.');
       }
 
       await transaction(() async {
@@ -1687,17 +1690,17 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (sortie.flightStatus == 'CLOSED') {
         _log.w('Cannot abort a closed sortie.');
-        throw Exception('Cannot abort a closed sortie.');
+        throw AppFailure('Cannot abort a closed sortie.');
       }
 
       if (sortie.flightStatus == 'ABORTED') {
         _log.w('Sortie is already aborted.');
-        throw Exception('Sortie is already aborted.');
+        throw AppFailure('Sortie is already aborted.');
       }
 
       if (sortie.flightStatus == 'FLOWN') {
         _log.w('Cannot abort a sortie after landing.');
-        throw Exception('Cannot abort a sortie after landing.');
+        throw AppFailure('Cannot abort a sortie after landing.');
       }
 
       await transaction(() async {
@@ -1733,7 +1736,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
     if (sortie == null) {
       _log.w('Sortie not found: $flightId');
-      throw Exception('Sortie not found: $flightId');
+      throw AppFailure('Sortie not found: $flightId');
     }
 
     return sortie;
@@ -1744,7 +1747,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
     if (sortie.flightStatus != 'PREFLIGHT') {
       _log.w('Sortie is not editable because it is ${sortie.flightStatus}.');
-      throw Exception(
+      throw AppFailure(
         'Sortie is not editable because it is ${sortie.flightStatus}.',
       );
     }
@@ -1763,7 +1766,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
     if (template == null) {
       _log.w('No active checklist template found for vehicle.');
-      throw Exception('No active checklist template found for vehicle.');
+      throw AppFailure('No active checklist template found for vehicle.');
     }
 
     return template;
@@ -1842,7 +1845,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
     if (sessionBattery == null) {
       _log.w('Battery $batteryId was not added to this field session.');
-      throw Exception(
+      throw AppFailure(
         'Battery $batteryId was not added to this field session.',
       );
     }

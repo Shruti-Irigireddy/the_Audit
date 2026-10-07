@@ -1,5 +1,6 @@
 import 'package:bloc/bloc.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/pre_flight/domain/dtos/pre_flight_dtos.dart';
 import 'package:the_audit/features/pre_flight/domain/entities/checklist_response_entity.dart';
@@ -866,7 +867,7 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.failure,
-        errorMessage: error.toString(),
+        errorMessage: friendlyError(error),
       ),
     );
   }

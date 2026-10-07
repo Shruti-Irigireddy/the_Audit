@@ -567,6 +567,70 @@ void main() {
       }
     });
 
+    test('saving Go makes the sortie READY for post-flight', () async {
+      await db
+          .into(db.users)
+          .insert(
+            UsersCompanion.insert(
+              id: 'u1',
+              name: 'Tester',
+              role: 'PIC',
+              email: 'tester@example.com',
+            ),
+          );
+      final kari = (await db.vehicleDao.getActiveVehicles()).firstWhere(
+        (v) => v.name == 'Kari',
+      );
+      final sessionId = await db.preFieldDao.createFieldSession(
+        date: DateTime(2026, 10, 7),
+        locationName: 'Test site',
+        latitude: 12.97,
+        longitude: 77.59,
+        missionType: 'TESTING',
+        sessionStatus: 'PLANNED',
+        createdBy: 'u1',
+      );
+      final sessionVehicleId = await db.preFieldDao.addVehicleToSession(
+        sessionId: sessionId,
+        vehicleId: kari.id,
+        performedBy: 'u1',
+      );
+      final flightId = await db.preFlightDao.createSortie(
+        sessionId: sessionId,
+        sessionVehicleId: sessionVehicleId,
+        picUserId: 'u1',
+        performedBy: 'u1',
+      );
+      // Pass every blocking [A] item (numbers need a value).
+      for (final item in await db.preFlightDao
+          .loadBlockingChecklistItemsForSortie(flightId)) {
+        final isNumber = item.responseType == ChecklistResponseTypes.number;
+        await db.preFlightDao.saveChecklistResponse(
+          flightId: flightId,
+          itemId: item.id,
+          response: isNumber ? 'VALUE' : 'PASS',
+          valueNumber: isNumber ? 25.2 : null,
+          createdBy: 'u1',
+        );
+      }
+
+      await db.preFlightDao.submitGoNoGoDecision(
+        flightId: flightId,
+        decision: 'GO',
+        decisionBy: 'u1',
+      );
+
+      final sortie = await (db.select(
+        db.sorties,
+      )..where((s) => s.flightId.equals(flightId))).getSingle();
+      expect(sortie.flightStatus, 'READY');
+      // Post-flight accepts it with no take-off or landing times: only the
+      // notes are still missing.
+      expect(await db.postFlightDao.validatePostFlightCompletion(flightId), [
+        'Post-flight note is required.',
+      ]);
+    });
+
     test('removing a session vehicle removes its packing snapshot', () async {
       await db
           .into(db.users)
@@ -621,6 +685,67 @@ void main() {
       expect(await db.select(db.sessionVehicles).get(), isEmpty);
       expect(await db.select(db.sessionEquipmentItems).get(), isEmpty);
     });
+  });
+
+  test('upgrading to v11 makes sorties with a saved Go READY', () async {
+    final dir = await Directory.systemTemp.createTemp('the_audit_test');
+    final file = File('${dir.path}/the_audit.db');
+    addTearDown(() => dir.delete(recursive: true));
+
+    // A v10 database: one sortie with Go saved (still PREFLIGHT, as v10
+    // left it) and one still being checked.
+    final v10 = AppDatabase.forTesting(NativeDatabase(file));
+    await v10
+        .into(v10.users)
+        .insert(
+          UsersCompanion.insert(
+            id: 'u1',
+            name: 'Tester',
+            role: 'PIC',
+            email: 'tester@example.com',
+          ),
+        );
+    final kari = (await v10.vehicleDao.getActiveVehicles()).firstWhere(
+      (v) => v.name == 'Kari',
+    );
+    final sessionId = await v10.preFieldDao.createFieldSession(
+      date: DateTime(2026, 10, 7),
+      locationName: 'Test site',
+      latitude: 12.97,
+      longitude: 77.59,
+      missionType: 'TESTING',
+      sessionStatus: 'PLANNED',
+      createdBy: 'u1',
+    );
+    final sessionVehicleId = await v10.preFieldDao.addVehicleToSession(
+      sessionId: sessionId,
+      vehicleId: kari.id,
+      quantity: 2,
+      performedBy: 'u1',
+    );
+    Future<String> sortie() => v10.preFlightDao.createSortie(
+      sessionId: sessionId,
+      sessionVehicleId: sessionVehicleId,
+      picUserId: 'u1',
+      performedBy: 'u1',
+    );
+    final withGo = await sortie();
+    final checking = await sortie();
+    await v10.customStatement(
+      "UPDATE sorties SET final_decision = 'GO' WHERE flight_id = ?",
+      [withGo],
+    );
+    await v10.customStatement('PRAGMA user_version = 10');
+    await v10.close();
+
+    final db = AppDatabase.forTesting(NativeDatabase(file));
+    addTearDown(db.close);
+    Future<String> status(String id) async => (await (db.select(
+      db.sorties,
+    )..where((s) => s.flightId.equals(id))).getSingle()).flightStatus;
+
+    expect(await status(withGo), 'READY');
+    expect(await status(checking), 'PREFLIGHT');
   });
 
   test(

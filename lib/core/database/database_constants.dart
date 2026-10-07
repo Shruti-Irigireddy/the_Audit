@@ -47,6 +47,8 @@ class DbStatuses {
   static const maintenance = 'MAINTENANCE';
   static const pending = 'PENDING';
   static const preflight = 'PREFLIGHT';
+  /// Go saved: the sortie waits for its post-flight notes.
+  static const ready = 'READY';
   static const retired = 'RETIRED';
 }
 

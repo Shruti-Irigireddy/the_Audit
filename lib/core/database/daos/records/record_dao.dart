@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/database/dtos/shared_dtos.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
@@ -508,7 +509,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
 
       if (amendmentText.trim().isEmpty) {
         _log.w('Amendment text cannot be empty.');
-        throw Exception('Amendment text cannot be empty.');
+        throw AppFailure('Amendment text cannot be empty.');
       }
 
       await transaction(() async {
