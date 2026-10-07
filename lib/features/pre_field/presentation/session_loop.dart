@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import 'package:the_audit/features/auth/data/current_user_repository.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/core/utils/step_indicator.dart';
@@ -417,27 +418,10 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
     return clean.isEmpty ? null : clean;
   }
 
-  Future<String> _performedBy() async {
-    final state = widget.authCubit.state;
-    final uid = state.uid?.trim();
-    if (uid != null && uid.isNotEmpty) {
-      final user = await (widget.database.select(
-        widget.database.users,
-      )..where((row) => row.id.equals(uid))).getSingleOrNull();
-      if (user != null) return user.id;
-    }
-
-    final email = state.email?.trim();
-    if (email != null && email.isNotEmpty) {
-      final user = await (widget.database.select(
-        widget.database.users,
-      )..where((row) => row.email.equals(email))).getSingleOrNull();
-      if (user != null) return user.id;
-    }
-
-    _log.w('no local user for ${AppLogger.mask(email)}, using fallback id');
-    return uid ?? email ?? 'unknown';
-  }
+  /// The signed-in user, as a row in the local users table.
+  Future<String> _performedBy() => CurrentUserRepository(
+    widget.database,
+  ).resolvePerformedBy(widget.authCubit.state);
 }
 
 class _CreateSortieCard extends StatelessWidget {

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import 'package:the_audit/features/pre_flight/data/repositories/pre_flight_repository_impl.dart';
+import 'package:the_audit/features/auth/data/current_user_repository.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/navbar.dart';
@@ -10,7 +12,6 @@ import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:the_audit/features/post_flight/data/repositories/post_flight_repository_impl.dart';
 import 'package:the_audit/features/post_flight/presentation/cubit/post_flight_cubit.dart';
 import 'package:the_audit/features/post_flight/presentation/cubit/post_flight_state.dart';
-import 'package:the_audit/features/pre_flight/data/mappers/pre_flight_mapper.dart';
 import 'package:the_audit/features/pre_flight/domain/entities/sortie_user_entity.dart';
 
 const _log = AppLogger('PostFlight');
@@ -329,37 +330,18 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
   }
 
   Future<void> _loadSortieUsers() async {
-    final users = await widget.database.preFlightDao.getSortieUsers(
-      widget.flightId,
-    );
+    final users = await PreFlightRepositoryImpl(
+      widget.database.preFlightDao,
+    ).getSortieUsers(widget.flightId);
     _log.d('loaded ${users.length} sortie users');
     if (!mounted) return;
-    setState(() {
-      _sortieUsers = users.map((item) => item.toEntity()).toList();
-    });
+    setState(() => _sortieUsers = users);
   }
 
-  Future<String> _performedBy() async {
-    final state = widget.authCubit.state;
-    final uid = state.uid?.trim();
-    if (uid != null && uid.isNotEmpty) {
-      final user = await (widget.database.select(
-        widget.database.users,
-      )..where((row) => row.id.equals(uid))).getSingleOrNull();
-      if (user != null) return user.id;
-    }
-
-    final email = state.email?.trim();
-    if (email != null && email.isNotEmpty) {
-      final user = await (widget.database.select(
-        widget.database.users,
-      )..where((row) => row.email.equals(email))).getSingleOrNull();
-      if (user != null) return user.id;
-    }
-
-    _log.w('performedBy: no local user, using raw id');
-    return uid ?? email ?? 'unknown';
-  }
+  /// The signed-in user, as a row in the local users table.
+  Future<String> _performedBy() => CurrentUserRepository(
+    widget.database,
+  ).resolvePerformedBy(widget.authCubit.state);
 
   InputDecoration _inputDecoration(String label) {
     return InputDecoration(labelText: label);

@@ -676,6 +676,8 @@ class LocalAuthSessions extends Table {
   ],
 )
 class AppDatabase extends _$AppDatabase {
+  static const _log = AppLogger('AppDatabase');
+
   AppDatabase() : super(_openConnection());
 
   /// For tests: runs against the given executor (e.g. an in-memory DB).
@@ -749,7 +751,27 @@ class AppDatabase extends _$AppDatabase {
           );
         }
       },
+      // SQLite ignores `references(...)` unless this is on for each
+      // connection. It runs after migrations, so seeding isn't affected.
+      beforeOpen: (details) async {
+        await customStatement('PRAGMA foreign_keys = ON');
+        if (AppLogger.enabled) await _logForeignKeyProblems();
+      },
     );
+  }
+
+  /// Debug logs only: rows written before foreign keys were enforced that
+  /// point at a missing parent. They stay readable; only new writes are
+  /// checked.
+  Future<void> _logForeignKeyProblems() async {
+    final rows = await customSelect('PRAGMA foreign_key_check').get();
+    if (rows.isEmpty) return;
+    final byTable = <String, int>{};
+    for (final row in rows) {
+      final table = row.data['table'] as String? ?? '?';
+      byTable[table] = (byTable[table] ?? 0) + 1;
+    }
+    _log.w('rows with a missing parent (before foreign keys): $byTable');
   }
 
   /// Adds the SRS §5.1 common pre-flight items to [templateId], from

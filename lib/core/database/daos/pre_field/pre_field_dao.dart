@@ -463,6 +463,11 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           db.sessionVehiclePayload,
         )..where((v) => v.sessionVehicleId.equals(sessionVehicleId))).go();
 
+        // The vehicle's packing snapshot goes with it.
+        await (delete(
+          db.sessionEquipmentItems,
+        )..where((v) => v.sessionVehicleId.equals(sessionVehicleId))).go();
+
         await (delete(
           db.sessionVehicles,
         )..where((v) => v.id.equals(sessionVehicleId))).go();
@@ -551,6 +556,10 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
         for (final sessionVehicle in existingSessionVehicles) {
           await (delete(
             db.sessionVehiclePayload,
+          )..where((v) => v.sessionVehicleId.equals(sessionVehicle.id))).go();
+          // The vehicle's packing snapshot goes with it.
+          await (delete(
+            db.sessionEquipmentItems,
           )..where((v) => v.sessionVehicleId.equals(sessionVehicle.id))).go();
         }
 

@@ -1,8 +1,7 @@
-import 'package:drift/drift.dart' show InsertMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:uuid/uuid.dart';
 
+import 'package:the_audit/features/auth/data/current_user_repository.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/navbar.dart';
@@ -23,7 +22,6 @@ import 'package:the_audit/features/pre_flight/domain/entities/sortie_entity.dart
 import 'package:the_audit/features/pre_flight/presentation/cubit/pre_flight_cubit.dart';
 import 'package:the_audit/features/pre_flight/presentation/cubit/pre_flight_state.dart';
 
-const _uuid = Uuid();
 const _log = AppLogger('SessionScreen');
 
 enum _LoopStep { setup, checklist, postFlight }
@@ -371,40 +369,9 @@ class _SessionScreenState extends State<SessionScreen> {
     };
   }
 
-  Future<String> _resolvePerformedBy() async {
-    final authState = widget.authCubit.state;
-    final uid = authState.uid?.trim();
-    if (uid != null && uid.isNotEmpty) {
-      final user = await (widget.database.select(
-        widget.database.users,
-      )..where((row) => row.id.equals(uid))).getSingleOrNull();
-      if (user != null) return user.id;
-    }
-
-    final email = authState.email?.trim();
-    if (email != null && email.isNotEmpty) {
-      final user = await (widget.database.select(
-        widget.database.users,
-      )..where((row) => row.email.equals(email))).getSingleOrNull();
-      if (user != null) return user.id;
-    }
-
-    final userId = uid != null && uid.isNotEmpty ? uid : _uuid.v4();
-    _log.w('no local user; inserting placeholder $userId');
-    await widget.database
-        .into(widget.database.users)
-        .insert(
-          UsersCompanion.insert(
-            id: userId,
-            name: 'User',
-            role: 'PIC',
-            email: email ?? '$userId@local.the-audit',
-          ),
-          mode: InsertMode.insertOrIgnore,
-        );
-
-    return userId;
-  }
+  Future<String> _resolvePerformedBy() => CurrentUserRepository(
+    widget.database,
+  ).resolvePerformedBy(widget.authCubit.state);
 
   void _showPreFieldError(BuildContext context, PreFieldState state) {
     if (state.hasError) _showMessage(state.errorMessage!);

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/theme.dart';
@@ -7,6 +8,10 @@ import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/features/pre_field/presentation/pre-field.dart';
 import 'package:the_audit/features/pre_field/presentation/session_loop.dart';
 import 'package:the_audit/features/profile/presentation/profile_page.dart';
+import 'package:the_audit/features/records/data/repositories/records_repository_impl.dart';
+import 'package:the_audit/features/records/domain/entities/record_entity.dart';
+import 'package:the_audit/features/records/presentation/cubit/records_cubit.dart';
+import 'package:the_audit/features/records/presentation/cubit/records_state.dart';
 
 const _log = AppLogger('Home');
 
@@ -20,26 +25,26 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  late Future<List<FieldSession>> _sessions;
+  late final RecordsCubit _records;
 
   @override
   void initState() {
     super.initState();
     _log.t('initState');
-    _sessions = widget.database.recordDao.getRecentSessions();
+    _records = RecordsCubit(RecordRepositoryImpl(widget.database.recordDao))
+      ..loadRecentSessions();
   }
 
   @override
   void dispose() {
     _log.t('dispose');
+    _records.close();
     super.dispose();
   }
 
-  void _reload() {
+  Future<void> _reload() {
     _log.d('reloading sessions');
-    setState(() {
-      _sessions = widget.database.recordDao.getRecentSessions();
-    });
+    return _records.loadRecentSessions();
   }
 
   Future<void> _createSession() async {
@@ -56,7 +61,7 @@ class _HomePageState extends State<HomePage> {
     if (mounted) _reload();
   }
 
-  Future<void> _openSession(FieldSession session) async {
+  Future<void> _openSession(FieldSessionEntity session) async {
     _log.i(
       'open session ${session.sessionId} (status: ${session.sessionStatus})',
     );
@@ -96,13 +101,14 @@ class _HomePageState extends State<HomePage> {
         },
       ),
       body: SafeArea(
-        child: FutureBuilder<List<FieldSession>>(
-          future: _sessions,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
+        child: BlocBuilder<RecordsCubit, RecordsState>(
+          bloc: _records,
+          builder: (context, state) {
+            // Spinner only until the first list arrives; a refresh keeps it.
+            if (state.isLoading && state.sessions.isEmpty) {
               return const Center(child: CircularProgressIndicator());
             }
-            if (snapshot.hasError) {
+            if (state.status == RecordsStatus.failure) {
               return const Center(
                 child: Text(
                   'Sessions could not be loaded.',
@@ -111,9 +117,9 @@ class _HomePageState extends State<HomePage> {
               );
             }
 
-            final sessions = snapshot.data ?? const [];
+            final sessions = state.sessions;
             return RefreshIndicator(
-              onRefresh: () async => _reload(),
+              onRefresh: _reload,
               child: ListView(
                 padding: AppSizes.pageInsets.copyWith(bottom: 96),
                 children: [
@@ -145,7 +151,7 @@ class _HomePageState extends State<HomePage> {
 }
 
 class _SessionTile extends StatelessWidget {
-  final FieldSession session;
+  final FieldSessionEntity session;
   final VoidCallback onTap;
 
   const _SessionTile({required this.session, required this.onTap});

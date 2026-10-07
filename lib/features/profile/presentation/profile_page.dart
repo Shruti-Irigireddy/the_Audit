@@ -1,7 +1,7 @@
-import 'package:drift/drift.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:flutter/material.dart';
 
+import 'package:the_audit/features/auth/data/user_repository.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/navbar.dart';
@@ -48,25 +48,9 @@ class _ProfilePageState extends State<ProfilePage> {
       return null;
     }
 
-    final userByUid = await (widget.database.select(
-      widget.database.users,
-    )..where((row) => row.id.equals(firebaseUser.uid))).getSingleOrNull();
-
-    if (userByUid != null) {
-      _log.d('local user found by uid');
-      return userByUid;
-    }
-
-    final email = firebaseUser.email?.trim().toLowerCase();
-    if (email == null || email.isEmpty) {
-      _log.w('no local user and no email');
-      return null;
-    }
-    _log.d('looking up local user by ${AppLogger.mask(email)}');
-
-    return (widget.database.select(
-      widget.database.users,
-    )..where((row) => row.email.lower().equals(email))).getSingleOrNull();
+    return UserRepository(
+      widget.database,
+    ).findUser(uid: firebaseUser.uid, email: firebaseUser.email);
   }
 
   Future<void> _logout() async {

@@ -308,6 +308,11 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
           db.payloadVehicleCompatibility,
         )..where((v) => v.payloadId.equals(payloadId))).go();
 
+        // Vehicle limits point at the payload too.
+        await (delete(
+          db.payloadVehicles,
+        )..where((v) => v.payloadId.equals(payloadId))).go();
+
         await (delete(
           db.payloads,
         )..where((v) => v.payloadId.equals(payloadId))).go();

@@ -2,23 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:drift/drift.dart' show InsertMode;
-import 'package:uuid/uuid.dart';
 
-import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
+import 'package:the_audit/features/auth/data/current_user_repository.dart';
 import 'package:the_audit/core/database/app_database.dart';
-import 'package:the_audit/core/database/checklists/common_preflight.dart';
-import 'package:the_audit/core/database/dtos/equipment_dtos.dart';
 import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/core/utils/step_indicator.dart';
 import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
-import 'package:the_audit/features/auth/data/user_directory.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_state.dart';
-import 'package:the_audit/features/vehicle/domain/dtos/vehicle_dtos.dart';
 import 'package:the_audit/features/vehicle/presentation/widgets/vehicle_tiles.dart';
 import 'package:the_audit/features/pre_field/data/repositories/pre_field_repository_impl.dart';
+import 'package:the_audit/features/pre_field/data/repositories/session_setup_repository.dart';
 import 'package:the_audit/features/pre_field/presentation/cubit/pre_field_cubit.dart';
 import 'package:the_audit/features/pre_field/presentation/cubit/pre_field_state.dart';
 import 'package:the_audit/features/pre_field/presentation/session_loop.dart';
@@ -49,7 +44,6 @@ enum PreFieldSessionStatus {
   const PreFieldSessionStatus(this.label, this.dbValue);
 }
 
-const _uuid = Uuid();
 const _log = AppLogger('CreateSession');
 const _dialogLog = AppLogger('VehicleDetailsDialog');
 
@@ -193,6 +187,8 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   bool _submitting = false;
   bool _gettingCurrentLocation = false;
 
+  late final _setup = SessionSetupRepository(widget.database);
+
   /// Current wizard step: 0 details, 1 equipment, 2 packing, 3 review.
   int _step = 0;
 
@@ -225,11 +221,9 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
       _isOpen(toggled, key) ? _flip(toggled, key) : toggled;
 
   /// Active payloads and the vehicle types each fits (empty set = any type).
-  List<Payload> _payloads = [];
-  Map<String, Set<String>> _payloadTypes = {};
-
-  /// Payloads limited to specific vehicles: payload id -> vehicle ids.
-  Map<String, Set<String>> _payloadVehicleLimits = {};
+  /// Active payloads and which vehicles each fits.
+  PayloadCatalog _payloadCatalog = PayloadCatalog.empty;
+  List<Payload> get _payloads => _payloadCatalog.payloads;
 
   /// Payloads taken, for all selected vehicles together.
   Set<String> _selectedPayloadIds = {};
@@ -292,10 +286,9 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   Future<void> _loadEquipmentLists() async {
     setState(() => _loadingEquipment = true);
     try {
-      final dao = widget.database.equipmentDao;
       final lists = <String, List<EquipmentTemplateItem>>{
         for (final key in _equipmentListKeys)
-          key: await dao.getTemplateItems(
+          key: await _setup.getEquipmentList(
             vehicleId: key == _toolsKey ? null : key,
           ),
       };
@@ -841,7 +834,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           widget.database,
           widget.authCubit.state,
         );
-        await widget.database.equipmentDao.addTemplateItem(
+        await _setup.addEquipmentItem(
           vehicleId: key == _toolsKey ? null : key,
           category: result.category,
           name: result.name,
@@ -878,22 +871,19 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           widget.database,
           widget.authCubit.state,
         );
-        final dao = widget.database.equipmentDao;
         if (result.remove) {
-          await dao.deactivateTemplateItem(
+          await _setup.removeEquipmentItem(
             id: item.id,
             performedBy: performedBy,
           );
           _log.i('equipment item ${item.id} removed');
         } else {
-          await dao.updateTemplateItem(
+          await _setup.updateEquipmentItem(
             id: item.id,
             category: result.category,
             name: result.name,
             quantity: result.quantity,
             spares: result.spares,
-            clearQuantity: result.quantity == null,
-            clearSpares: result.spares == null,
             performedBy: performedBy,
           );
           _log.i('equipment item ${item.id} edited');
@@ -1215,11 +1205,13 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         }
         _log.d('added ${_selectedVehicleIds.length} vehicles');
 
-        await _saveVehiclePayloads(
-          database: database,
+        final links = await _setup.linkPayloadsToSessionVehicles(
           sessionId: sessionId,
+          catalog: _payloadCatalog,
+          payloadIds: _selectedPayloadIds,
           performedBy: createdBy,
         );
+        _log.d('saved $links vehicle payload links');
 
         final teamMembers = <({String userId, String role})>[
           for (final crewUserId in _crewUserIds)
@@ -1237,7 +1229,6 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         _log.d('added ${teamMembers.length} team members');
 
         await _saveEquipment(
-          database: database,
           sessionId: sessionId,
           performedBy: createdBy,
         );
@@ -1276,61 +1267,30 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   /// Stores the session's equipment snapshot: every item that's on the
   /// packing check, with whether it was ticked (FR-PFT-09).
   Future<void> _saveEquipment({
-    required AppDatabase database,
     required String sessionId,
     required String performedBy,
   }) async {
     await _log.trace('saveEquipment', () async {
-      final dao = database.equipmentDao;
-      final sessionVehicleIds = {
-        for (final row in await database.preFieldDao.getSessionVehicles(
-          sessionId,
-        ))
-          row.vehicle.id: row.sessionVehicle.id,
-      };
-
-      final drafts = <SessionEquipmentDraft>[];
-      for (final key in _equipmentListKeys) {
-        final sessionVehicleId = key == _toolsKey
-            ? null
-            : sessionVehicleIds[key];
-        if (key != _toolsKey && sessionVehicleId == null) continue;
-        // Save on step 1 happens before the lists were opened: load them.
-        final items =
-            _equipmentLists[key] ??
-            await dao.getTemplateItems(
-              vehicleId: key == _toolsKey ? null : key,
-            );
-        for (final item in items.where(_isPackable)) {
-          drafts.add(
-            SessionEquipmentDraft(
-              sessionVehicleId: sessionVehicleId,
-              templateItemId: item.id,
-              category: item.category,
-              name: item.name,
-              quantity: item.quantity,
-              spares: item.spares,
-              isPacked: _packedItemIds.contains(item.id),
-              categoryOrder: item.categoryOrder,
-              sortOrder: item.sortOrder,
-            ),
-          );
-        }
-      }
-
-      await dao.saveSessionEquipment(
+      await _setup.saveSessionEquipment(
         sessionId: sessionId,
-        items: drafts,
+        vehicleIds: [
+          for (final key in _equipmentListKeys)
+            if (key != _toolsKey) key,
+        ],
+        loadedLists: {
+          for (final entry in _equipmentLists.entries)
+            entry.key == _toolsKey ? null : entry.key: entry.value,
+        },
+        isPackable: _isPackable,
+        packedItemIds: _packedItemIds,
         performedBy: performedBy,
       );
     });
   }
 
   Future<void> _loadVehicles() async {
-    final database = widget.database;
-
     try {
-      final vehicles = await database.vehicleDao.getActiveVehicles();
+      final vehicles = await _setup.getActiveVehicles();
       _log.d('loaded ${vehicles.length} vehicles');
       if (!mounted) return;
       setState(() {
@@ -1350,10 +1310,8 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   /// Shows the saved (local) users immediately, then refreshes them from
   /// Firestore. Offline, the saved list stays.
   Future<void> _loadUsers() async {
-    final database = widget.database;
-
     Future<void> showLocal() async {
-      final users = await database.preFieldDao.getSelectableUsers();
+      final users = await _setup.getSelectableUsers();
       _log.d('loaded ${users.length} users');
       if (!mounted) return;
       setState(() => _users = users);
@@ -1362,14 +1320,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     try {
       await showLocal();
 
-      final directory = UserDirectory(database);
-      final current = firebase_auth.FirebaseAuth.instance.currentUser;
-      if (current != null) await directory.registerSignedInUser(current);
-      try {
-        await directory.syncToLocal();
-      } catch (error, stackTrace) {
-        _log.w('user sync failed; using saved users', error, stackTrace);
-      }
+      await _setup.refreshUsersFromDirectory();
       await showLocal();
     } catch (error, stackTrace) {
       _log.e('load users failed', error, stackTrace);
@@ -1524,55 +1475,16 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
 
   Future<void> _loadPayloads() async {
     try {
-      final dao = widget.database.payloadDao;
-      final payloads = [
-        for (final payload in await dao.getAllPayloads())
-          if (payload.status == 'ACTIVE') payload,
-      ];
-      final types = {
-        for (final payload in payloads)
-          payload.payloadId: {
-            for (final type in await dao.getCompatibleVehicleTypes(
-              payload.payloadId,
-            ))
-              type.trim().toUpperCase(),
-          },
-      };
-      final limits = <String, Set<String>>{};
-      for (final payload in payloads) {
-        final vehicleIds = await dao.getLimitedVehicleIds(payload.payloadId);
-        if (vehicleIds.isNotEmpty) limits[payload.payloadId] = {...vehicleIds};
-      }
-      _log.d(
-        'loaded ${payloads.length} payloads (${limits.length} vehicle-limited)',
-      );
+      final catalog = await _setup.loadPayloadCatalog();
       if (!mounted) return;
-      setState(() {
-        _payloads = payloads;
-        _payloadTypes = types;
-        _payloadVehicleLimits = limits;
-      });
+      setState(() => _payloadCatalog = catalog);
     } catch (error, stackTrace) {
       _log.e('load payloads failed', error, stackTrace);
     }
   }
 
-  /// Payloads [vehicle] can carry: a payload limited to specific vehicles
-  /// fits only those; otherwise it fits by vehicle type (no type rows = any).
-  List<Payload> _payloadsFor(Vehicle vehicle) {
-    final type = vehicle.type.trim().toUpperCase();
-    bool fits(Payload payload) {
-      final limit = _payloadVehicleLimits[payload.payloadId];
-      if (limit != null) return limit.contains(vehicle.id);
-      final types = _payloadTypes[payload.payloadId] ?? const <String>{};
-      return types.isEmpty || types.contains(type);
-    }
-
-    return [
-      for (final payload in _payloads)
-        if (fits(payload)) payload,
-    ];
-  }
+  List<Payload> _payloadsFor(Vehicle vehicle) =>
+      _payloadCatalog.payloadsFor(vehicle);
 
   /// Payloads that fit at least one selected vehicle, each listed once.
   List<Payload> get _payloadOptions {
@@ -1710,12 +1622,12 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           widget.database,
           widget.authCubit.state,
         );
-        final payloadId = await widget.database.payloadDao.createPayload(
+        final payloadId = await _setup.createPayload(
           name: draft.name,
           category: draft.category,
           storageType: draft.storageType,
           storageCapacity: draft.storageCapacity,
-          compatibleVehicleTypes: draft.vehicleTypes.toList(),
+          vehicleTypes: draft.vehicleTypes.toList(),
           performedBy: performedBy,
         );
         _log.i('payload created $payloadId');
@@ -1734,29 +1646,6 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     });
   }
 
-  /// Links each chosen payload to every session vehicle it fits (FR-PFT-06).
-  Future<void> _saveVehiclePayloads({
-    required AppDatabase database,
-    required String sessionId,
-    required String performedBy,
-  }) async {
-    if (_selectedPayloadIds.isEmpty) return;
-
-    final dao = database.preFieldDao;
-    var count = 0;
-    for (final row in await dao.getSessionVehicles(sessionId)) {
-      for (final payload in _payloadsFor(row.vehicle)) {
-        if (!_selectedPayloadIds.contains(payload.payloadId)) continue;
-        await dao.addPayloadToSessionVehicle(
-          sessionVehicleId: row.sessionVehicle.id,
-          payloadId: payload.payloadId,
-          performedBy: performedBy,
-        );
-        count++;
-      }
-    }
-    _log.d('saved $count vehicle payload links');
-  }
 
   void _removeVehicle(Vehicle vehicle) {
     _log.d('vehicle ${vehicle.id} removed');
@@ -1783,46 +1672,21 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           widget.database,
           widget.authCubit.state,
         );
-        // updateVehicle treats null as "unchanged", so a cleared text field
-        // is written as '' to actually clear it.
-        String? edited(String? before, String? after) =>
-            after ?? (before == null ? null : '');
-        await widget.database.vehicleDao.updateVehicle(
-          vehicleId: vehicle.id,
+        // Clearing fields and renewing the checklist for a new type are
+        // handled by the repository.
+        await _setup.editVehicle(
+          before: vehicle,
           name: draft.name,
           type: draft.type.dbValue,
-          frameMake: edited(vehicle.frameMake, draft.frameMake),
-          frameModel: edited(vehicle.frameModel, draft.frameModel),
-          // null keeps the old count (an int can't be cleared to '').
+          frameMake: draft.frameMake,
+          frameModel: draft.frameModel,
           motorCount: draft.motorCount,
-          frameStyle: edited(vehicle.frameStyle, draft.frameStyle),
-          firmwareTarget: edited(vehicle.firmwareTarget, draft.firmwareTarget),
-          defaultFailSafeProfile: edited(
-            vehicle.defaultFailSafeProfile,
-            draft.defaultFailSafeProfile,
-          ),
-          notes: edited(vehicle.notes, draft.notes),
+          frameStyle: draft.frameStyle,
+          firmwareTarget: draft.firmwareTarget,
+          defaultFailSafeProfile: draft.defaultFailSafeProfile,
+          notes: draft.notes,
           performedBy: performedBy,
         );
-        // A new type needs that type's checklist: start a fresh version
-        // (flights keep the version they used).
-        if (draft.type.dbValue != vehicle.type.trim().toUpperCase()) {
-          await widget.database.vehicleDao.createNewChecklistVersionForVehicle(
-            vehicleId: vehicle.id,
-            checklistItems: [
-              for (final item in preflightChecklistFor(draft.type.dbValue))
-                ChecklistItemDraft(
-                  section: item.section,
-                  label: item.label,
-                  responseType: item.responseType,
-                  blocksArming: item.blocksArming,
-                ),
-            ],
-            createdBy: performedBy,
-            deactivationReason: 'Vehicle type changed to ${draft.type.dbValue}',
-          );
-          _log.i('vehicle ${vehicle.id} checklist renewed for new type');
-        }
         _log.i('vehicle ${vehicle.id} edited');
         await _loadVehicles();
       } catch (error, stackTrace) {
@@ -1845,29 +1709,19 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
           widget.database,
           widget.authCubit.state,
         );
-        final vehicleId = await widget.database.vehicleDao
-            .createVehicleWithChecklist(
-              name: draft.name,
-              type: draft.type.dbValue,
-              frameMake: draft.frameMake,
-              frameModel: draft.frameModel,
-              motorCount: draft.motorCount,
-              frameStyle: draft.frameStyle,
-              firmwareTarget: draft.firmwareTarget,
-              defaultFailSafeProfile: draft.defaultFailSafeProfile,
-              notes: draft.notes,
-              createdByUserId: performedBy,
-              // Common pre-flight items plus the ones for its type.
-              checklistItems: [
-                for (final item in preflightChecklistFor(draft.type.dbValue))
-                  ChecklistItemDraft(
-                    section: item.section,
-                    label: item.label,
-                    responseType: item.responseType,
-                    blocksArming: item.blocksArming,
-                  ),
-              ],
-            );
+        // Common pre-flight items plus the ones for its type.
+        final vehicleId = await _setup.createVehicle(
+          name: draft.name,
+          type: draft.type.dbValue,
+          frameMake: draft.frameMake,
+          frameModel: draft.frameModel,
+          motorCount: draft.motorCount,
+          frameStyle: draft.frameStyle,
+          firmwareTarget: draft.firmwareTarget,
+          defaultFailSafeProfile: draft.defaultFailSafeProfile,
+          notes: draft.notes,
+          performedBy: performedBy,
+        );
         _log.i('vehicle created $vehicleId (${draft.type.dbValue})');
         await _loadVehicles();
         if (!mounted) return;
@@ -1971,55 +1825,12 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         norm(vehicle.notes) != draft.notes;
   }
 
-  Future<void> _ensureCurrentUser(
-    AppDatabase database,
-    AuthState authState,
-    String userId,
-  ) async {
-    final existingUser = await (database.select(
-      database.users,
-    )..where((row) => row.id.equals(userId))).getSingleOrNull();
 
-    if (existingUser != null) return;
-
-    await database
-        .into(database.users)
-        .insert(
-          UsersCompanion.insert(
-            id: userId,
-            name: 'User',
-            role: 'PIC',
-            email: authState.email ?? '$userId@local.the-audit',
-          ),
-          mode: InsertMode.insertOrIgnore,
-        );
-  }
-
+  /// The signed-in user, as a row in the local users table.
   Future<String> _resolvePerformedBy(
     AppDatabase database,
     AuthState authState,
-  ) async {
-    final uid = authState.uid?.trim();
-    if (uid != null && uid.isNotEmpty) {
-      final user = await (database.select(
-        database.users,
-      )..where((row) => row.id.equals(uid))).getSingleOrNull();
-      if (user != null) return user.id;
-    }
-
-    final email = authState.email?.trim();
-    if (email != null && email.isNotEmpty) {
-      final user = await (database.select(
-        database.users,
-      )..where((row) => row.email.equals(email))).getSingleOrNull();
-      if (user != null) return user.id;
-    }
-
-    final userId = uid != null && uid.isNotEmpty ? uid : _uuid.v4();
-    _log.w('no local user for ${AppLogger.mask(email)}, ensuring user $userId');
-    await _ensureCurrentUser(database, authState, userId);
-    return userId;
-  }
+  ) => CurrentUserRepository(database).resolvePerformedBy(authState);
 
   String? _requiredValidator(String? value) {
     if (value == null || value.trim().isEmpty) {
