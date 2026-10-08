@@ -510,6 +510,9 @@ class PostFlightNotes extends Table {
   TextColumn get logLocation => text().nullable()(); // Path or URL
   TextColumn get logNotes => text().nullable()();
   IntColumn get flightDurationSeconds => integer().nullable()();
+  // Landed battery state (FR-POST-02); batteries aren't picked per sortie.
+  RealColumn get landedBatteryVoltage => real().nullable()();
+  IntColumn get landedBatteryPercent => integer().nullable()();
   BoolColumn get followUpRequired =>
       boolean().withDefault(const Constant(false))();
   TextColumn get followUpNotes => text().nullable()();
@@ -692,7 +695,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration {
@@ -757,6 +760,10 @@ class AppDatabase extends _$AppDatabase {
             "UPDATE sorties SET flight_status = 'READY' "
             "WHERE flight_status = 'PREFLIGHT' AND final_decision = 'GO'",
           );
+        }
+        if (from < 12) {
+          await m.addColumn(postFlightNotes, postFlightNotes.landedBatteryVoltage);
+          await m.addColumn(postFlightNotes, postFlightNotes.landedBatteryPercent);
         }
       },
       // SQLite ignores `references(...)` unless this is on for each

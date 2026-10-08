@@ -293,20 +293,14 @@ class _SessionScreenState extends State<SessionScreen> {
 
       await _runBusy(() async {
         final performedBy = await _resolvePerformedBy();
-        await _postFlightCubit.savePostFlightNote(
+        await _postFlightCubit.saveAndClose(
           flightId: sortie.flightId,
-          objectiveResult: 'COMPLETED',
+          objectiveResult: 'YES',
           objectiveNotes: _emptyToNull(_objectiveNotesController.text),
           issuesEncountered: _emptyToNull(_issuesController.text),
           notes: _emptyToNull(_notesController.text),
           followUpRequired: _issuesController.text.trim().isNotEmpty,
-          followUpStatus: _issuesController.text.trim().isEmpty ? null : 'OPEN',
-          createdBy: performedBy,
-        );
-
-        await _postFlightCubit.closeSortie(
-          flightId: sortie.flightId,
-          closedBy: performedBy,
+          performedBy: performedBy,
         );
 
         if (closeSession) {

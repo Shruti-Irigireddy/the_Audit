@@ -111,8 +111,10 @@ class PostFlightCubit extends Cubit<PostFlightState> {
     }
   }
 
-  Future<void> savePostFlightNote({
-    String? id,
+  /// Saves the notes and closes the sortie (FR-POST-08). A sortie that is
+  /// already closed is just saved again; the database logs that edit as an
+  /// amendment. Returns whether it worked.
+  Future<bool> saveAndClose({
     required String flightId,
     required String objectiveResult,
     String? objectiveNotes,
@@ -121,16 +123,19 @@ class PostFlightCubit extends Cubit<PostFlightState> {
     String? logStoredAt,
     String? logLocation,
     String? logNotes,
+    int? flightDurationSeconds,
+    double? landedBatteryVoltage,
+    int? landedBatteryPercent,
     bool followUpRequired = false,
     String? followUpNotes,
     String? followUpAssignedTo,
-    DateTime? followUpDueDate,
     String? followUpStatus,
     String? notes,
-    required String createdBy,
+    required String performedBy,
   }) async {
     _log.i(
-      'savePostFlightNote($flightId, objective: $objectiveResult, followUp: $followUpRequired)',
+      'saveAndClose($flightId, objective: $objectiveResult, '
+      'followUp: $followUpRequired)',
     );
     emit(
       state.copyWith(
@@ -141,7 +146,6 @@ class PostFlightCubit extends Cubit<PostFlightState> {
 
     try {
       await _repository.savePostFlightNote(
-        id: id,
         flightId: flightId,
         objectiveResult: objectiveResult,
         objectiveNotes: objectiveNotes,
@@ -150,18 +154,27 @@ class PostFlightCubit extends Cubit<PostFlightState> {
         logStoredAt: logStoredAt,
         logLocation: logLocation,
         logNotes: logNotes,
+        flightDurationSeconds: flightDurationSeconds,
+        landedBatteryVoltage: landedBatteryVoltage,
+        landedBatteryPercent: landedBatteryPercent,
         followUpRequired: followUpRequired,
         followUpNotes: followUpNotes,
         followUpAssignedTo: followUpAssignedTo,
-        followUpDueDate: followUpDueDate,
         followUpStatus: followUpStatus,
         notes: notes,
-        createdBy: createdBy,
+        createdBy: performedBy,
       );
+      final sortie = state.setup?.sortie;
+      if (sortie?.flightStatus != 'CLOSED') {
+        await _repository.closeSortie(flightId: flightId, closedBy: performedBy);
+        _log.i('sortie closed: $flightId');
+      }
       await loadSetup(flightId);
+      return !state.hasError;
     } catch (error, stackTrace) {
-      _log.e('savePostFlightNote failed', error, stackTrace);
+      _log.e('saveAndClose failed', error, stackTrace);
       _emitFailure(error);
+      return false;
     }
   }
 

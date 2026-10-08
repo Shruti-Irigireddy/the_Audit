@@ -9,6 +9,8 @@ class PostFlightNoteEntity {
   final String? logLocation;
   final String? logNotes;
   final int? flightDurationSeconds;
+  final double? landedBatteryVoltage;
+  final int? landedBatteryPercent;
   final bool followUpRequired;
   final String? followUpNotes;
   final String? followUpAssignedTo;
@@ -30,6 +32,8 @@ class PostFlightNoteEntity {
     this.logLocation,
     this.logNotes,
     this.flightDurationSeconds,
+    this.landedBatteryVoltage,
+    this.landedBatteryPercent,
     required this.followUpRequired,
     this.followUpNotes,
     this.followUpAssignedTo,

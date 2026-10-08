@@ -9,6 +9,7 @@ import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/database/checklists/common_preflight.dart';
 import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/core/database/dtos/equipment_dtos.dart';
+import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/features/auth/data/current_user_repository.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_state.dart';
 import 'package:the_audit/features/pre_field/data/repositories/session_setup_repository.dart';
@@ -429,6 +430,58 @@ void main() {
       },
     );
 
+    test('a session closes only when every sortie is closed', () async {
+      await db
+          .into(db.users)
+          .insert(
+            UsersCompanion.insert(
+              id: 'u1',
+              name: 'Tester',
+              role: 'PIC',
+              email: 'tester@example.com',
+            ),
+          );
+      final kari = (await db.vehicleDao.getActiveVehicles()).firstWhere(
+        (v) => v.name == 'Kari',
+      );
+      final sessionId = await db.preFieldDao.createFieldSession(
+        date: DateTime(2026, 10, 7),
+        locationName: 'Test site',
+        latitude: 12.97,
+        longitude: 77.59,
+        missionType: 'TESTING',
+        sessionStatus: 'PLANNED',
+        createdBy: 'u1',
+      );
+      final sessionVehicleId = await db.preFieldDao.addVehicleToSession(
+        sessionId: sessionId,
+        vehicleId: kari.id,
+        performedBy: 'u1',
+      );
+      final flightId = await db.preFlightDao.createSortie(
+        sessionId: sessionId,
+        sessionVehicleId: sessionVehicleId,
+        picUserId: 'u1',
+        performedBy: 'u1',
+      );
+
+      Future<void> close() => db.preFieldDao.closeFieldSession(
+        sessionId: sessionId,
+        closedBy: 'u1',
+      );
+      await expectLater(close(), throwsA(isA<AppFailure>()));
+
+      await db.customStatement(
+        "UPDATE sorties SET flight_status = 'CLOSED' WHERE flight_id = ?",
+        [flightId],
+      );
+      await close();
+      expect(
+        (await db.recordDao.getSessionById(sessionId))!.sessionStatus,
+        'CLOSED',
+      );
+    });
+
     test('first pre-flight moves a PLANNED session to IN_PROGRESS', () async {
       await db
           .into(db.users)
@@ -516,31 +569,34 @@ void main() {
       );
     });
 
-    test('changing a vehicle type renews its checklist as a new version', () async {
-      final setup = SessionSetupRepository(db);
-      final kari = (await db.vehicleDao.getActiveVehicles()).firstWhere(
-        (v) => v.name == 'Kari',
-      );
-      final before = await db.vehicleDao.getActiveChecklistTemplateForVehicle(
-        kari.id,
-      );
+    test(
+      'changing a vehicle type renews its checklist as a new version',
+      () async {
+        final setup = SessionSetupRepository(db);
+        final kari = (await db.vehicleDao.getActiveVehicles()).firstWhere(
+          (v) => v.name == 'Kari',
+        );
+        final before = await db.vehicleDao.getActiveChecklistTemplateForVehicle(
+          kari.id,
+        );
 
-      await setup.editVehicle(
-        before: kari,
-        name: kari.name,
-        type: 'VTOL',
-        performedBy: DbUsers.systemUserId,
-      );
+        await setup.editVehicle(
+          before: kari,
+          name: kari.name,
+          type: 'VTOL',
+          performedBy: DbUsers.systemUserId,
+        );
 
-      final after = await db.vehicleDao.getActiveChecklistTemplateForVehicle(
-        kari.id,
-      );
-      expect(after!.version, before!.version + 1);
-      expect(
-        await db.vehicleDao.getChecklistItemsForTemplate(after.id),
-        hasLength(preflightChecklistFor('VTOL').length),
-      );
-    });
+        final after = await db.vehicleDao.getActiveChecklistTemplateForVehicle(
+          kari.id,
+        );
+        expect(after!.version, before!.version + 1);
+        expect(
+          await db.vehicleDao.getChecklistItemsForTemplate(after.id),
+          hasLength(preflightChecklistFor('VTOL').length),
+        );
+      },
+    );
 
     test('payloads fit by vehicle limit first, then by type', () async {
       final catalog = await SessionSetupRepository(db).loadPayloadCatalog();
@@ -602,8 +658,10 @@ void main() {
         performedBy: 'u1',
       );
       // Pass every blocking [A] item (numbers need a value).
-      for (final item in await db.preFlightDao
-          .loadBlockingChecklistItemsForSortie(flightId)) {
+      for (final item
+          in await db.preFlightDao.loadBlockingChecklistItemsForSortie(
+            flightId,
+          )) {
         final isNumber = item.responseType == ChecklistResponseTypes.number;
         await db.preFlightDao.saveChecklistResponse(
           flightId: flightId,
@@ -629,6 +687,38 @@ void main() {
       expect(await db.postFlightDao.validatePostFlightCompletion(flightId), [
         'Post-flight note is required.',
       ]);
+
+      // Save & close with stars, a typed duration and the landed battery.
+      Future<void> saveNote(String notes) =>
+          db.postFlightDao.savePostFlightNote(
+            flightId: flightId,
+            objectiveResult: 'YES',
+            missionRating: '4',
+            flightDurationSeconds: 12 * 60,
+            landedBatteryVoltage: 22.4,
+            landedBatteryPercent: 35,
+            notes: notes,
+            createdBy: 'u1',
+          );
+      await saveNote('All good');
+      await db.postFlightDao.closeSortie(flightId: flightId, closedBy: 'u1');
+
+      final closed = await (db.select(
+        db.sorties,
+      )..where((s) => s.flightId.equals(flightId))).getSingle();
+      expect(closed.flightStatus, 'CLOSED');
+      var note = (await db.postFlightDao.getPostFlightNoteForFlight(flightId))!;
+      expect(note.missionRating, '4');
+      expect(note.flightDurationSeconds, 12 * 60);
+      expect(note.landedBatteryVoltage, 22.4);
+      expect(note.landedBatteryPercent, 35);
+
+      // Edited after close: saved, and logged as an amendment.
+      await saveNote('All good; prop nick found later');
+      note = (await db.postFlightDao.getPostFlightNoteForFlight(flightId))!;
+      expect(note.notes, 'All good; prop nick found later');
+      final amendments = await db.select(db.recordAmendments).get();
+      expect(amendments.single.amendmentText, 'Edited after close: notes');
     });
 
     test('removing a session vehicle removes its packing snapshot', () async {
@@ -735,6 +825,13 @@ void main() {
       "UPDATE sorties SET final_decision = 'GO' WHERE flight_id = ?",
       [withGo],
     );
+    // v12 added the landed battery columns.
+    await v10.customStatement(
+      'ALTER TABLE post_flight_notes DROP COLUMN landed_battery_voltage',
+    );
+    await v10.customStatement(
+      'ALTER TABLE post_flight_notes DROP COLUMN landed_battery_percent',
+    );
     await v10.customStatement('PRAGMA user_version = 10');
     await v10.close();
 
@@ -787,6 +884,13 @@ void main() {
         "INSERT INTO checklist_items (id, template_id, section, label, "
         "response_type, sort_order) VALUES ('old-item', 'old-tpl', "
         "'General', 'Visual inspection complete', 'PASS_FAIL_NA', 0)",
+      );
+      // v12 added the landed battery columns.
+      await v2.customStatement(
+        'ALTER TABLE post_flight_notes DROP COLUMN landed_battery_voltage',
+      );
+      await v2.customStatement(
+        'ALTER TABLE post_flight_notes DROP COLUMN landed_battery_percent',
       );
       await v2.customStatement('PRAGMA user_version = 2');
       await v2.close();

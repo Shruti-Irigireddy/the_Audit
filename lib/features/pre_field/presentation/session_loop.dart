@@ -97,6 +97,15 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
                   if (busyStatuses.contains(sortie.flightStatus))
                     sortie.sessionVehicleId,
               };
+              // The session can close once every sortie is finished: closed
+              // after post-flight, or aborted by a No-Go.
+              final openSorties = sorties
+                  .where(
+                    (s) =>
+                        s.flightStatus != 'CLOSED' &&
+                        s.flightStatus != 'ABORTED',
+                  )
+                  .length;
               return ListView(
                 padding: AppSizes.pageInsets,
                 children: [
@@ -119,8 +128,9 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  // Flight flow: 1 prepare sortie, 2 pre-flight, 3 post-flight.
-                  const StepIndicator(current: 0, count: 3),
+                  // Sortie steps: 1 prepare sortie, 2 pre-flight. Post-flight
+                  // is its own page afterwards.
+                  const StepIndicator(current: 0, count: 2, outerLines: true),
                   const SizedBox(height: 16),
                   Text('Sorties', style: AppTextStyles.sectionTitle),
                   const SizedBox(height: 8),
@@ -267,11 +277,35 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
                     },
                   ),
                   const SizedBox(height: 18),
-                  OutlinedButton.icon(
-                    onPressed: _closeSession,
-                    icon: const Icon(Icons.lock_outline),
-                    label: const Text('Close session'),
-                  ),
+                  // Filled (like the other actions) once it can be used.
+                  if (openSorties == 0)
+                    FilledButton.icon(
+                      onPressed: _closeSession,
+                      icon: const Icon(Icons.lock_outline),
+                      label: const Text('Close session'),
+                    )
+                  else
+                    const OutlinedButton(
+                      onPressed: null,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.lock_outline, size: 18),
+                          SizedBox(width: 8),
+                          Text('Close session'),
+                        ],
+                      ),
+                    ),
+                  if (openSorties > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        'Close every sortie first '
+                        '($openSorties still open).',
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.caption,
+                      ),
+                    ),
                 ],
               );
             },
@@ -389,7 +423,7 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
 
   Future<void> _openPostFlight(String flightId) async {
     _log.d('open post-flight $flightId');
-    await Navigator.of(context).push(
+    await Navigator.of(context).push<void>(
       MaterialPageRoute(
         settings: const RouteSettings(name: 'PostFlightNotes'),
         builder: (_) => PostFlightNotesPage(
@@ -410,6 +444,16 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
         sessionId: widget.sessionId,
         closedBy: performedBy,
       );
+      if (!mounted) return;
+      final state = _preFieldCubit.state;
+      final messenger = ScaffoldMessenger.of(context);
+      if (state.hasError) {
+        messenger.showSnackBar(SnackBar(content: Text(state.errorMessage!)));
+        return;
+      }
+      // Back to the sessions list, where it now shows as Closed.
+      messenger.showSnackBar(const SnackBar(content: Text('Session closed.')));
+      Navigator.of(context).pop();
     });
   }
 

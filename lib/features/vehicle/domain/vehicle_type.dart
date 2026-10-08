@@ -11,9 +11,9 @@ enum VehicleType {
   const VehicleType(this.label, this.dbValue);
 
   String get imageAsset => switch (this) {
-    VehicleType.multirotor => 'assets/images/vehicles/multirotor.png',
-    VehicleType.vtol => 'assets/images/vehicles/vtol.png',
-    VehicleType.fixedWing => 'assets/images/vehicles/fixed_wing.png',
+    VehicleType.multirotor => 'assets/images/vehicles/multirotor.webp',
+    VehicleType.vtol => 'assets/images/vehicles/vtol.webp',
+    VehicleType.fixedWing => 'assets/images/vehicles/fixed_wing.webp',
   };
 
   static VehicleType? fromDb(String value) {

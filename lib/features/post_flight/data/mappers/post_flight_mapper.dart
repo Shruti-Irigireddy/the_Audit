@@ -19,6 +19,8 @@ extension PostFlightNotesDbMapper on PostFlightNote {
       logLocation: logLocation,
       logNotes: logNotes,
       flightDurationSeconds: flightDurationSeconds,
+      landedBatteryVoltage: landedBatteryVoltage,
+      landedBatteryPercent: landedBatteryPercent,
       followUpRequired: followUpRequired,
       followUpNotes: followUpNotes,
       followUpAssignedTo: followUpAssignedTo,

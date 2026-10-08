@@ -164,6 +164,21 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
         throw AppFailure('Field session is already closed: $sessionId');
       }
 
+      // Every sortie must be finished: closed after post-flight, or aborted.
+      final openSorties =
+          await (select(db.sorties)..where(
+                (s) =>
+                    s.sessionId.equals(sessionId) &
+                    s.flightStatus.isNotIn(const ['CLOSED', 'ABORTED']),
+              ))
+              .get();
+      if (openSorties.isNotEmpty) {
+        _log.w('${openSorties.length} sortie(s) still open in $sessionId');
+        throw AppFailure(
+          'Close every sortie first (${openSorties.length} still open).',
+        );
+      }
+
       final now = DateTime.now();
 
       await transaction(() async {

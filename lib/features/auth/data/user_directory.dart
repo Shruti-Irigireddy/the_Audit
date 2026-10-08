@@ -61,13 +61,16 @@ class UserDirectory {
           .timeout(const Duration(seconds: 10));
 
       var saved = 0;
-      for (final doc in snapshot.docs) {
-        final data = doc.data();
-        final email = (data['email'] as String?)?.trim();
-        if (email == null || email.isEmpty) continue;
-        final name = displayName(data['name'] as String?, email);
-        if (await _saveLocal(id: doc.id, name: name, email: email)) saved++;
-      }
+      // One transaction: far fewer disk writes than one per user.
+      await _db.transaction(() async {
+        for (final doc in snapshot.docs) {
+          final data = doc.data();
+          final email = (data['email'] as String?)?.trim();
+          if (email == null || email.isEmpty) continue;
+          final name = displayName(data['name'] as String?, email);
+          if (await _saveLocal(id: doc.id, name: name, email: email)) saved++;
+        }
+      });
       _log.i('synced $saved / ${snapshot.docs.length} users from Firestore');
       return saved;
     });

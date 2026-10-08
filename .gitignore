@@ -70,3 +70,6 @@ migrate_working_dir/
 
 # Daos
 **/*.g.dart
+# Private keys: never commit
+github_shruti
+github_shruti.pub

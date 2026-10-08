@@ -158,6 +158,9 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
     String? logStoredAt,
     String? logLocation,
     String? logNotes,
+    int? flightDurationSeconds,
+    double? landedBatteryVoltage,
+    int? landedBatteryPercent,
     bool followUpRequired = false,
     String? followUpNotes,
     String? followUpAssignedTo,
@@ -170,9 +173,12 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
       'savePostFlightNote(id: $id, flightId: $flightId, objectiveResult: $objectiveResult, missionRating: $missionRating, logStoredAt: $logStoredAt, followUpStatus: $followUpStatus)',
     );
     return _log.trace('savePostFlightNote', () async {
-      await _ensurePostFlightEditable(flightId);
-
       final sortie = await _requireSortie(flightId);
+      // A closed sortie can still be edited; each edit is also logged as an
+      // amendment (who, when, what changed).
+      final editingClosed = _isStatus(sortie, _statusClosed);
+      if (!editingClosed) await _ensurePostFlightEditable(flightId);
+
       final existingNote = await getPostFlightNoteForFlight(flightId);
 
       final noteId = existingNote?.id ?? id ?? _uuid.v4();
@@ -199,8 +205,13 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
         followUpAssignedTo: followUpAssignedTo,
         followUpDueDate: followUpDueDate,
       );
+      _validateLandedState(
+        flightDurationSeconds: flightDurationSeconds,
+        landedBatteryVoltage: landedBatteryVoltage,
+        landedBatteryPercent: landedBatteryPercent,
+      );
 
-      final durationSeconds = _calculateFlightDurationSeconds(sortie);
+      final durationSeconds = flightDurationSeconds ?? _calculateFlightDurationSeconds(sortie);
       final now = DateTime.now();
 
       await transaction(() async {
@@ -217,6 +228,8 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
               logLocation: Value(logLocation),
               logNotes: Value(logNotes),
               flightDurationSeconds: Value(durationSeconds),
+              landedBatteryVoltage: Value(landedBatteryVoltage),
+              landedBatteryPercent: Value(landedBatteryPercent),
               followUpRequired: Value(resolvedFollowUpRequired),
               followUpNotes: Value(followUpNotes),
               followUpAssignedTo: Value(followUpAssignedTo),
@@ -239,6 +252,8 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
               logLocation: Value(logLocation),
               logNotes: Value(logNotes),
               flightDurationSeconds: Value(durationSeconds),
+              landedBatteryVoltage: Value(landedBatteryVoltage),
+              landedBatteryPercent: Value(landedBatteryPercent),
               followUpRequired: Value(resolvedFollowUpRequired),
               followUpNotes: Value(followUpNotes),
               followUpAssignedTo: Value(followUpAssignedTo),
@@ -260,6 +275,51 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
           description: 'Post-flight note saved',
           performedBy: createdBy,
         );
+
+        if (editingClosed && existingNote != null) {
+          final changed = _changedFields(existingNote, {
+            'objective result': normalizedObjectiveResult,
+            'objective notes': objectiveNotes,
+            'mission rating': normalizedMissionRating,
+            'issues': issuesEncountered,
+            'log storage': normalizedLogStoredAt,
+            'log location': logLocation,
+            'log notes': logNotes,
+            'flight duration': durationSeconds,
+            'landed battery voltage': landedBatteryVoltage,
+            'landed battery %': landedBatteryPercent,
+            'follow-up required': resolvedFollowUpRequired,
+            'follow-up notes': followUpNotes,
+            'follow-up assigned to': followUpAssignedTo,
+            'follow-up status': normalizedFollowUpStatus,
+            'notes': notes,
+          });
+          if (changed.isNotEmpty) {
+            final amendmentId = _uuid.v4();
+            final text = 'Edited after close: ${changed.join(', ')}';
+            await into(db.recordAmendments).insert(
+              RecordAmendmentsCompanion.insert(
+                id: amendmentId,
+                entityType: 'POST_FLIGHT_NOTE',
+                entityId: noteId,
+                amendmentText: text,
+                createdBy: createdBy,
+              ),
+            );
+            await _insertAuditEvent(
+              entityType: 'POST_FLIGHT_NOTE',
+              entityId: noteId,
+              action: 'AMEND',
+              description: text,
+              performedBy: createdBy,
+            );
+            await _enqueueSync(
+              entityType: 'RECORD_AMENDMENT',
+              entityId: amendmentId,
+              operation: 'INSERT',
+            );
+          }
+        }
 
         await _enqueueSync(
           entityType: 'POST_FLIGHT_NOTE',
@@ -886,7 +946,9 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
       final sortie = check.sortie;
       final postFlightNote = check.postFlightNote;
-      final durationSeconds = _calculateFlightDurationSeconds(sortie);
+      final durationSeconds =
+          _calculateFlightDurationSeconds(sortie) ??
+          postFlightNote?.flightDurationSeconds;
       final now = DateTime.now();
 
       await transaction(() async {
@@ -1136,10 +1198,58 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
     return issues;
   }
 
+  void _validateLandedState({
+    int? flightDurationSeconds,
+    double? landedBatteryVoltage,
+    int? landedBatteryPercent,
+  }) {
+    if (flightDurationSeconds != null && flightDurationSeconds < 0) {
+      throw AppFailure('Flight duration cannot be negative.');
+    }
+    if (landedBatteryVoltage != null && landedBatteryVoltage < 0) {
+      throw AppFailure('Landed battery voltage cannot be negative.');
+    }
+    if (landedBatteryPercent != null &&
+        (landedBatteryPercent < 0 || landedBatteryPercent > 100)) {
+      throw AppFailure('Landed battery % must be between 0 and 100.');
+    }
+  }
+
+  /// Names of the fields whose new value differs from [note].
+  List<String> _changedFields(
+    PostFlightNote note,
+    Map<String, Object?> values,
+  ) {
+    final before = <String, Object?>{
+      'objective result': _upper(note.objectiveResult),
+      'objective notes': note.objectiveNotes,
+      'mission rating': _nullableUpper(note.missionRating),
+      'issues': note.issuesEncountered,
+      'log storage': _nullableUpper(note.logStoredAt),
+      'log location': note.logLocation,
+      'log notes': note.logNotes,
+      'flight duration': note.flightDurationSeconds,
+      'landed battery voltage': note.landedBatteryVoltage,
+      'landed battery %': note.landedBatteryPercent,
+      'follow-up required': note.followUpRequired,
+      'follow-up notes': note.followUpNotes,
+      'follow-up assigned to': note.followUpAssignedTo,
+      'follow-up status': _upper(note.followUpStatus),
+      'notes': note.notes,
+    };
+    return [
+      for (final entry in values.entries)
+        if (before[entry.key] != entry.value) entry.key,
+    ];
+  }
+
   bool _requiresFollowUp({String? objectiveResult, String? issuesEncountered}) {
     final normalizedObjectiveResult = _nullableUpper(objectiveResult);
+    // Anomaly notes are always filled in now; structural damage (saved as a
+    // "Structural damage: ..." line) is what counts as an incident.
     final hasIssue =
-        issuesEncountered != null && issuesEncountered.trim().isNotEmpty;
+        issuesEncountered != null &&
+        issuesEncountered.contains('Structural damage: ');
 
     return hasIssue ||
         (normalizedObjectiveResult != null &&
@@ -1245,6 +1355,13 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
   static const Set<String> _allowedObjectiveResults = {'YES', 'NO', 'PARTIAL'};
 
   static const Set<String> _allowedMissionRatings = {
+    // Stars.
+    '1',
+    '2',
+    '3',
+    '4',
+    '5',
+    // Older notes.
     'EXCELLENT',
     'GOOD',
     'AVERAGE',

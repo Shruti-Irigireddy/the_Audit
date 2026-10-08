@@ -29,7 +29,7 @@ class SplashScreen extends StatelessWidget {
               builder: (context, scale, child) =>
                   Transform.scale(scale: scale, child: child),
               child: Image.asset(
-                'assets/images/branding/splash_logo.png',
+                'assets/images/branding/splash_logo.webp',
                 width: 300,
                 height: 300,
               ),

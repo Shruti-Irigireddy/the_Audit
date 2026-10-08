@@ -364,11 +364,12 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  // Flight flow: 1 prepare sortie, 2 pre-flight, 3 post-flight.
-                  // Step 1 goes back to the session loop.
+                  // Sortie steps: 1 prepare sortie, 2 pre-flight. Step 1 goes
+                  // back to the session loop.
                   StepIndicator(
                     current: 1,
-                    count: 3,
+                    count: 2,
+                    outerLines: true,
                     onStepTap: (index) {
                       if (index == 0) Navigator.of(context).pop();
                     },

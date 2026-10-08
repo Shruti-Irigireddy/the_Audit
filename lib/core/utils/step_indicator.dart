@@ -10,27 +10,33 @@ class StepIndicator extends StatelessWidget {
 
   /// Called with a step's index when it's tapped; null = not tappable.
   final ValueChanged<int>? onStepTap;
+ 
+  final bool outerLines;
 
   const StepIndicator({
     super.key,
     required this.current,
     required this.count,
     this.onStepTap,
+    this.outerLines = false,
   });
+
+  Widget _line(bool done) => Expanded(
+    child: Container(
+      height: 2,
+      margin: const EdgeInsets.symmetric(horizontal: 6),
+      color: done ? AppStepper.lineDone : AppStepper.lineTodo,
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
+        // Started, so the lead-in line is always done.
+        if (outerLines) _line(true),
         for (var i = 0; i < count; i++) ...[
-          if (i > 0)
-            Expanded(
-              child: Container(
-                height: 2,
-                margin: const EdgeInsets.symmetric(horizontal: 6),
-                color: i <= current ? AppStepper.lineDone : AppStepper.lineTodo,
-              ),
-            ),
+          if (i > 0) _line(i <= current),
           Semantics(
             label: 'Step ${i + 1} of $count',
             selected: i == current,
@@ -72,6 +78,7 @@ class StepIndicator extends StatelessWidget {
             ),
           ),
         ],
+        if (outerLines) _line(current >= count),
       ],
     );
   }

@@ -1320,6 +1320,11 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
 
     try {
       await showLocal();
+      // Saved users are enough to pick from: stop waiting while the team
+      // list refreshes from Firestore (up to 10 s when offline).
+      if (_users.isNotEmpty && mounted) {
+        setState(() => _loadingUsers = false);
+      }
 
       await _setup.refreshUsersFromDirectory();
       await showLocal();
