@@ -162,8 +162,9 @@ extension PreFieldSummaryDataDbMapper on db_pre_field.PreFieldSummaryData {
       vehicles: vehicles.map((item) => item.toEntity()).toList(),
       batteries: batteries.map((item) => item.toEntity()).toList(),
       equipmentChecks: equipmentChecks.map((item) => item.toEntity()).toList(),
-      payloadCompatibilityIssues:
-          payloadCompatibilityIssues.map((item) => item.toEntity()).toList(),
+      payloadCompatibilityIssues: payloadCompatibilityIssues
+          .map((item) => item.toEntity())
+          .toList(),
     );
   }
 }

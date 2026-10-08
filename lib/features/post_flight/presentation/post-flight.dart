@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/navbar.dart';
@@ -159,7 +160,7 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
           }
         },
         builder: (context, state) {
-          final closed = state.setup?.sortie.flightStatus == 'CLOSED';
+          final closed = state.setup?.sortie.flightStatus == FlightStatus.closed;
           return Scaffold(
             appBar: const NavBar(),
             body: SafeArea(
@@ -615,7 +616,7 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
 
   Future<void> _save() => _log.trace('save', () async {
     final closedBefore =
-        _cubit.state.setup?.sortie.flightStatus == 'CLOSED';
+        _cubit.state.setup?.sortie.flightStatus == FlightStatus.closed;
     _log.i(
       'save tapped (objective: $_objectiveResult, stars: $_stars, '
       'followUp: $_followUpRequired, wasClosed: $closedBefore)',

@@ -1,6 +1,8 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:the_audit/core/database/database_constants.dart';
+import 'package:the_audit/core/database/dao_write_helpers.dart';
 import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/database/dtos/pre_flight_dtos.dart';
@@ -35,7 +37,7 @@ final _uuid = Uuid();
   ],
 )
 class PreFlightDao extends DatabaseAccessor<AppDatabase>
-    with _$PreFlightDaoMixin {
+    with _$PreFlightDaoMixin, DaoWriteHelpers {
   PreFlightDao(super.db);
 
   static const _log = AppLogger('PreFlightDao');
@@ -56,135 +58,140 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
     _log.t(
       'createSortie(flightId: $flightId, sessionId: $sessionId, sessionVehicleId: $sessionVehicleId, picUserId: $picUserId, selectedPayloads: ${selectedPayloadIds.length})',
     );
-    return _log.trace('createSortie', () async {
-      final id = flightId ?? _uuid.v4();
+    return _log.trace(
+      'createSortie',
+      () => transaction(() async {
+        final id = flightId ?? _uuid.v4();
 
-      final session = await (select(
-        db.fieldSessions,
-      )..where((v) => v.sessionId.equals(sessionId))).getSingleOrNull();
+        final session = await (select(
+          db.fieldSessions,
+        )..where((v) => v.sessionId.equals(sessionId))).getSingleOrNull();
 
-      if (session == null) {
-        _log.w('Field session not found: $sessionId');
-        throw AppFailure('Field session not found: $sessionId');
-      }
+        if (session == null) {
+          _log.w('Field session not found: $sessionId');
+          throw AppFailure('Field session not found: $sessionId');
+        }
 
-      if (session.sessionStatus == 'CLOSED') {
-        _log.w(
-          'Field session is closed. Cannot create a sortie in a closed session.',
-        );
-        throw AppFailure(
-          'Field session is closed. Cannot create a sortie in a closed session.',
-        );
-      }
-
-      final sessionVehicle = await (select(
-        db.sessionVehicles,
-      )..where((v) => v.id.equals(sessionVehicleId))).getSingleOrNull();
-
-      if (sessionVehicle == null) {
-        _log.w('Session vehicle not found: $sessionVehicleId');
-        throw AppFailure('Session vehicle not found: $sessionVehicleId');
-      }
-
-      if (sessionVehicle.sessionId != sessionId) {
-        _log.w('Vehicle was not brought to the selected field session.');
-        throw AppFailure(
-          'Vehicle was not brought to the selected field session.',
-        );
-      }
-
-      final activeTemplate = await _getActiveTemplateForVehicle(
-        sessionVehicle.vehicleId,
-      );
-
-      final nextSequenceNo = await _getNextSequenceNo(sessionId);
-
-      final uniquePayloadIds = selectedPayloadIds.toSet();
-
-      for (final payloadId in uniquePayloadIds) {
-        final isAllowed = await _isPayloadSelectableForSessionVehicle(
-          sessionVehicleId: sessionVehicleId,
-          payloadId: payloadId,
-        );
-
-        if (!isAllowed) {
+        if (session.sessionStatus == SessionStatus.closed) {
           _log.w(
-            'Payload $payloadId is not planned for this vehicle or is not compatible.',
+            'Field session is closed. Cannot create a sortie in a closed session.',
           );
           throw AppFailure(
-            'Payload $payloadId is not planned for this vehicle or is not compatible.',
+            'Field session is closed. Cannot create a sortie in a closed session.',
           );
         }
-      }
 
-      await transaction(() async {
-        await into(db.sorties).insert(
-          SortiesCompanion.insert(
-            flightId: id,
-            sessionId: sessionId,
-            sequenceNo: nextSequenceNo,
-            sessionVehicleId: sessionVehicleId,
-            picUserId: picUserId,
-            objective: Value(objective ?? sessionVehicle.objective),
-            checklistTemplateId: activeTemplate.id,
-            checklistTemplateVersion: activeTemplate.version,
-            flightStatus: const Value('PREFLIGHT'),
-          ),
+        final sessionVehicle = await (select(
+          db.sessionVehicles,
+        )..where((v) => v.id.equals(sessionVehicleId))).getSingleOrNull();
+
+        if (sessionVehicle == null) {
+          _log.w('Session vehicle not found: $sessionVehicleId');
+          throw AppFailure('Session vehicle not found: $sessionVehicleId');
+        }
+
+        if (sessionVehicle.sessionId != sessionId) {
+          _log.w('Vehicle was not brought to the selected field session.');
+          throw AppFailure(
+            'Vehicle was not brought to the selected field session.',
+          );
+        }
+
+        final activeTemplate = await _getActiveTemplateForVehicle(
+          sessionVehicle.vehicleId,
         );
+
+        final nextSequenceNo = await _getNextSequenceNo(sessionId);
+
+        final uniquePayloadIds = selectedPayloadIds.toSet();
 
         for (final payloadId in uniquePayloadIds) {
-          await into(db.sortiePayloads).insert(
-            SortiePayloadsCompanion.insert(
-              id: _uuid.v4(),
-              flightId: id,
-              payloadId: payloadId,
-            ),
-            mode: InsertMode.insertOrIgnore,
+          final isAllowed = await _isPayloadSelectableForSessionVehicle(
+            sessionVehicleId: sessionVehicleId,
+            payloadId: payloadId,
           );
+
+          if (!isAllowed) {
+            _log.w(
+              'Payload $payloadId is not planned for this vehicle or is not compatible.',
+            );
+            throw AppFailure(
+              'Payload $payloadId is not planned for this vehicle or is not compatible.',
+            );
+          }
         }
 
-        await _touchSession(sessionId);
-
-        // The first pre-flight starts the field work: PLANNED -> IN_PROGRESS.
-        if (session.sessionStatus == 'PLANNED') {
-          await (update(
-            db.fieldSessions,
-          )..where((v) => v.sessionId.equals(sessionId))).write(
-            const FieldSessionsCompanion(sessionStatus: Value('IN_PROGRESS')),
+        await transaction(() async {
+          await into(db.sorties).insert(
+            SortiesCompanion.insert(
+              flightId: id,
+              sessionId: sessionId,
+              sequenceNo: nextSequenceNo,
+              sessionVehicleId: sessionVehicleId,
+              picUserId: picUserId,
+              objective: Value(objective ?? sessionVehicle.objective),
+              checklistTemplateId: activeTemplate.id,
+              checklistTemplateVersion: activeTemplate.version,
+              flightStatus: const Value(FlightStatus.preflight),
+            ),
           );
-          await _insertAuditEvent(
-            entityType: 'FIELD_SESSION',
-            entityId: sessionId,
-            action: 'UPDATE',
-            description: 'Session started (PLANNED -> IN_PROGRESS)',
+
+          for (final payloadId in uniquePayloadIds) {
+            await into(db.sortiePayloads).insert(
+              SortiePayloadsCompanion.insert(
+                id: _uuid.v4(),
+                flightId: id,
+                payloadId: payloadId,
+              ),
+              mode: InsertMode.insertOrIgnore,
+            );
+          }
+
+          await _touchSession(sessionId);
+
+          // The first pre-flight starts the field work: PLANNED -> IN_PROGRESS.
+          if (session.sessionStatus == SessionStatus.planned) {
+            await (update(
+              db.fieldSessions,
+            )..where((v) => v.sessionId.equals(sessionId))).write(
+              const FieldSessionsCompanion(
+                sessionStatus: Value(SessionStatus.inProgress),
+              ),
+            );
+            await insertAuditEvent(
+              entityType: 'FIELD_SESSION',
+              entityId: sessionId,
+              action: 'UPDATE',
+              description: 'Session started (PLANNED -> IN_PROGRESS)',
+              performedBy: performedBy,
+            );
+            await enqueueSync(
+              entityType: 'FIELD_SESSION',
+              entityId: sessionId,
+              operation: 'UPDATE',
+            );
+            _log.i('session $sessionId started: PLANNED -> IN_PROGRESS');
+          }
+
+          await insertAuditEvent(
+            entityType: 'SORTIE',
+            entityId: id,
+            action: 'CREATE',
+            description:
+                'Sortie created with checklist template v${activeTemplate.version}',
             performedBy: performedBy,
           );
-          await _enqueueSync(
-            entityType: 'FIELD_SESSION',
-            entityId: sessionId,
-            operation: 'UPDATE',
+
+          await enqueueSync(
+            entityType: 'SORTIE',
+            entityId: id,
+            operation: 'INSERT',
           );
-          _log.i('session $sessionId started: PLANNED -> IN_PROGRESS');
-        }
+        });
 
-        await _insertAuditEvent(
-          entityType: 'SORTIE',
-          entityId: id,
-          action: 'CREATE',
-          description:
-              'Sortie created with checklist template v${activeTemplate.version}',
-          performedBy: performedBy,
-        );
-
-        await _enqueueSync(
-          entityType: 'SORTIE',
-          entityId: id,
-          operation: 'INSERT',
-        );
-      });
-
-      return id;
-    });
+        return id;
+      }),
+    );
   }
 
   Future<Sorty?> getSortieById(String flightId) {
@@ -196,11 +203,20 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
   Future<List<Sorty>> getSortiesForSession(String sessionId) {
     _log.t('getSortiesForSession(sessionId: $sessionId)');
-    return (select(db.sorties)
-          ..where((v) => v.sessionId.equals(sessionId))
-          ..orderBy([(v) => OrderingTerm.asc(v.sequenceNo)]))
-        .get();
+    return _sortiesForSession(sessionId).get();
   }
+
+  /// The session's sorties, re-emitted whenever any sortie changes.
+  Stream<List<Sorty>> watchSortiesForSession(String sessionId) {
+    _log.t('watchSortiesForSession(sessionId: $sessionId)');
+    return _sortiesForSession(sessionId).watch();
+  }
+
+  SimpleSelectStatement<$SortiesTable, Sorty> _sortiesForSession(
+    String sessionId,
+  ) => select(db.sorties)
+    ..where((v) => v.sessionId.equals(sessionId))
+    ..orderBy([(v) => OrderingTerm.asc(v.sequenceNo)]);
 
   Future<void> updateSortieBasicInfo({
     required String flightId,
@@ -227,7 +243,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SORTIE',
           entityId: flightId,
           action: 'UPDATE_BASIC_INFO',
@@ -235,7 +251,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SORTIE',
           entityId: flightId,
           operation: 'UPDATE',
@@ -316,7 +332,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSortie(flightId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SORTIE_USER',
           entityId: id,
           action: 'CREATE',
@@ -324,7 +340,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SORTIE_USER',
           entityId: id,
           operation: 'INSERT',
@@ -356,7 +372,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSortie(flightId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SORTIE',
           entityId: flightId,
           action: 'REMOVE_SORTIE_USER',
@@ -364,7 +380,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SORTIE',
           entityId: flightId,
           operation: 'UPDATE',
@@ -400,7 +416,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSortie(flightId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SORTIE',
           entityId: flightId,
           action: 'REPLACE_SORTIE_USERS',
@@ -408,7 +424,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SORTIE',
           entityId: flightId,
           operation: 'UPDATE',
@@ -487,20 +503,25 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
       return row.readTable(db.payloads);
     }).toList();
 
-    final selectable = <Payload>[];
-
-    for (final payload in plannedPayloads) {
-      final compatibilityRows = await (select(
-        db.payloadVehicleCompatibility,
-      )..where((v) => v.payloadId.equals(payload.payloadId))).get();
-
-      if (compatibilityRows.isEmpty ||
-          compatibilityRows.any((row) => row.vehicleType == vehicle.type)) {
-        selectable.add(payload);
-      }
+    // One query for every planned payload's compatible types.
+    final compatibilityRows =
+        await (select(db.payloadVehicleCompatibility)..where(
+              (v) => v.payloadId.isIn([
+                for (final payload in plannedPayloads) payload.payloadId,
+              ]),
+            ))
+            .get();
+    final typesByPayload = <String, Set<String>>{};
+    for (final row in compatibilityRows) {
+      (typesByPayload[row.payloadId] ??= {}).add(row.vehicleType);
     }
 
-    return selectable;
+    return [
+      for (final payload in plannedPayloads)
+        if (typesByPayload[payload.payloadId] case final types
+            when types == null || types.contains(vehicle.type))
+          payload,
+    ];
   }
 
   Future<void> addPayloadToSortie({
@@ -543,7 +564,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSortie(flightId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SORTIE_PAYLOAD',
           entityId: id,
           action: 'CREATE',
@@ -551,7 +572,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SORTIE_PAYLOAD',
           entityId: id,
           operation: 'INSERT',
@@ -580,7 +601,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSortie(flightId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SORTIE',
           entityId: flightId,
           action: 'REMOVE_PAYLOAD',
@@ -588,7 +609,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SORTIE',
           entityId: flightId,
           operation: 'UPDATE',
@@ -644,7 +665,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSortie(flightId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SORTIE',
           entityId: flightId,
           action: 'REPLACE_PAYLOADS',
@@ -652,7 +673,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SORTIE',
           entityId: flightId,
           operation: 'UPDATE',
@@ -750,7 +771,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSortie(flightId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SORTIE_BATTERY',
           entityId: id,
           action: 'CREATE',
@@ -760,7 +781,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SORTIE_BATTERY',
           entityId: id,
           operation: 'INSERT',
@@ -832,7 +853,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSortie(flightId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SORTIE',
           entityId: flightId,
           action: 'REPLACE_BATTERIES',
@@ -840,7 +861,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SORTIE',
           entityId: flightId,
           operation: 'UPDATE',
@@ -894,17 +915,17 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSortie(flightId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SORTIE_BATTERY',
-          entityId: '$flightId:$batteryId',
+          entityId: existing.id,
           action: 'UPDATE_START_STATE',
           description: 'Battery start state updated',
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SORTIE_BATTERY',
-          entityId: '$flightId:$batteryId',
+          entityId: existing.id,
           operation: 'UPDATE',
         );
       });
@@ -931,7 +952,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSortie(flightId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SORTIE',
           entityId: flightId,
           action: 'REMOVE_BATTERY',
@@ -939,7 +960,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SORTIE',
           entityId: flightId,
           operation: 'UPDATE',
@@ -1083,11 +1104,13 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
                   (v) => v.flightId.equals(flightId) & v.itemId.equals(itemId),
                 ))
                 .getSingleOrNull();
+        // Queued and audited by the row's own id.
+        final responseId = existingResponse?.id ?? _uuid.v4();
 
         if (existingResponse == null) {
           await into(db.checklistResponses).insert(
             ChecklistResponsesCompanion.insert(
-              id: _uuid.v4(),
+              id: responseId,
               flightId: flightId,
               itemId: itemId,
               response: response,
@@ -1115,17 +1138,17 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSortie(flightId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'CHECKLIST_RESPONSE',
-          entityId: '$flightId:$itemId',
+          entityId: responseId,
           action: existingResponse == null ? 'CREATE' : 'UPDATE',
           description: 'Checklist response saved',
           performedBy: createdBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'CHECKLIST_RESPONSE',
-          entityId: '$flightId:$itemId',
+          entityId: responseId,
           operation: existingResponse == null ? 'INSERT' : 'UPDATE',
         );
       });
@@ -1172,10 +1195,12 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
                   ))
                   .getSingleOrNull();
 
+          final responseId = existingResponse?.id ?? _uuid.v4();
+
           if (existingResponse == null) {
             await into(db.checklistResponses).insert(
               ChecklistResponsesCompanion.insert(
-                id: _uuid.v4(),
+                id: responseId,
                 flightId: flightId,
                 itemId: response.itemId,
                 response: response.response,
@@ -1201,17 +1226,17 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
             );
           }
 
-          await _insertAuditEvent(
+          await insertAuditEvent(
             entityType: 'CHECKLIST_RESPONSE',
-            entityId: '$flightId:${response.itemId}',
+            entityId: responseId,
             action: existingResponse == null ? 'CREATE' : 'UPDATE',
             description: 'Checklist response saved',
             performedBy: createdBy,
           );
 
-          await _enqueueSync(
+          await enqueueSync(
             entityType: 'CHECKLIST_RESPONSE',
-            entityId: '$flightId:${response.itemId}',
+            entityId: responseId,
             operation: existingResponse == null ? 'INSERT' : 'UPDATE',
           );
         }
@@ -1392,89 +1417,94 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
     _log.t(
       'createChecklistOverride(id: $id, flightId: $flightId, itemId: $itemId)',
     );
-    return _log.trace('createChecklistOverride', () async {
-      await _ensureSortieEditable(flightId);
+    return _log.trace(
+      'createChecklistOverride',
+      () => transaction(() async {
+        await _ensureSortieEditable(flightId);
 
-      final sortie = await _requireSortie(flightId);
+        final sortie = await _requireSortie(flightId);
 
-      final item = await (select(
-        db.checklistItems,
-      )..where((v) => v.id.equals(itemId))).getSingleOrNull();
+        final item = await (select(
+          db.checklistItems,
+        )..where((v) => v.id.equals(itemId))).getSingleOrNull();
 
-      if (item == null) {
-        _log.w('Checklist item not found: $itemId');
-        throw AppFailure('Checklist item not found: $itemId');
-      }
+        if (item == null) {
+          _log.w('Checklist item not found: $itemId');
+          throw AppFailure('Checklist item not found: $itemId');
+        }
 
-      if (item.templateId != sortie.checklistTemplateId) {
-        _log.w('Checklist item does not belong to sortie template.');
-        throw AppFailure('Checklist item does not belong to sortie template.');
-      }
+        if (item.templateId != sortie.checklistTemplateId) {
+          _log.w('Checklist item does not belong to sortie template.');
+          throw AppFailure(
+            'Checklist item does not belong to sortie template.',
+          );
+        }
 
-      if (!item.blocksArming) {
-        _log.w('Only blocking checklist items can be overridden.');
-        throw AppFailure('Only blocking checklist items can be overridden.');
-      }
+        if (!item.blocksArming) {
+          _log.w('Only blocking checklist items can be overridden.');
+          throw AppFailure('Only blocking checklist items can be overridden.');
+        }
 
-      final response =
-          await (select(db.checklistResponses)..where(
-                (v) => v.flightId.equals(flightId) & v.itemId.equals(itemId),
-              ))
-              .getSingleOrNull();
+        final response =
+            await (select(db.checklistResponses)..where(
+                  (v) => v.flightId.equals(flightId) & v.itemId.equals(itemId),
+                ))
+                .getSingleOrNull();
 
-      if (response == null) {
-        _log.w('Cannot override an item without a checklist response.');
-        throw AppFailure(
-          'Cannot override an item without a checklist response.',
-        );
-      }
+        if (response == null) {
+          _log.w('Cannot override an item without a checklist response.');
+          throw AppFailure(
+            'Cannot override an item without a checklist response.',
+          );
+        }
 
-      if (_isBlockingResponseSatisfied(item: item, response: response)) {
-        _log.w('Cannot override a checklist item that is already satisfied.');
-        throw AppFailure(
-          'Cannot override a checklist item that is already satisfied.',
-        );
-      }
+        if (_isBlockingResponseSatisfied(item: item, response: response)) {
+          _log.w('Cannot override a checklist item that is already satisfied.');
+          throw AppFailure(
+            'Cannot override a checklist item that is already satisfied.',
+          );
+        }
 
-      final existingOverride =
-          await (select(db.checklistOverrides)..where(
-                (v) => v.flightId.equals(flightId) & v.itemId.equals(itemId),
-              ))
-              .getSingleOrNull();
+        final existingOverride =
+            await (select(db.checklistOverrides)..where(
+                  (v) => v.flightId.equals(flightId) & v.itemId.equals(itemId),
+                ))
+                .getSingleOrNull();
 
-      if (existingOverride != null) {
-        _log.w('This checklist item already has an override.');
-        throw AppFailure('This checklist item already has an override.');
-      }
+        if (existingOverride != null) {
+          _log.w('This checklist item already has an override.');
+          throw AppFailure('This checklist item already has an override.');
+        }
 
-      await transaction(() async {
-        await into(db.checklistOverrides).insert(
-          ChecklistOverridesCompanion.insert(
-            id: id,
-            flightId: flightId,
-            itemId: itemId,
-            overrideReason: overrideReason,
-            overriddenBy: overriddenBy,
-          ),
-        );
+        await transaction(() async {
+          await into(db.checklistOverrides).insert(
+            ChecklistOverridesCompanion.insert(
+              id: id,
+              flightId: flightId,
+              itemId: itemId,
+              overrideReason: overrideReason,
+              overriddenBy: overriddenBy,
+            ),
+          );
 
-        await _touchSortie(flightId);
+          await _touchSortie(flightId);
 
-        await _insertAuditEvent(
-          entityType: 'CHECKLIST_OVERRIDE',
-          entityId: id,
-          action: 'CREATE',
-          description: overrideReason,
-          performedBy: overriddenBy,
-        );
+          await insertAuditEvent(
+            entityType: 'CHECKLIST_OVERRIDE',
+            entityId: id,
+            action: 'CREATE',
+            description: overrideReason,
+            performedBy: overriddenBy,
+          );
 
-        await _enqueueSync(
-          entityType: 'CHECKLIST_OVERRIDE',
-          entityId: id,
-          operation: 'INSERT',
-        );
-      });
-    });
+          await enqueueSync(
+            entityType: 'CHECKLIST_OVERRIDE',
+            entityId: id,
+            operation: 'INSERT',
+          );
+        });
+      }),
+    );
   }
 
   Future<List<ChecklistOverride>> getOverridesForFlight(String flightId) {
@@ -1496,64 +1526,80 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
     required String decisionBy,
   }) async {
     _log.t('submitGoNoGoDecision(flightId: $flightId, decision: $decision)');
-    return _log.trace('submitGoNoGoDecision', () async {
-      await _ensureSortieEditable(flightId);
+    return _log.trace(
+      'submitGoNoGoDecision',
+      () => transaction(() async {
+        await _ensureSortieEditable(flightId);
 
-      final normalizedDecision = decision.trim().toUpperCase();
+        final normalizedDecision = decision.trim().toUpperCase();
 
-      if (normalizedDecision != 'GO' && normalizedDecision != 'NO_GO') {
-        _log.w('Decision must be GO or NO_GO.');
-        throw AppFailure('Decision must be GO or NO_GO.');
-      }
-
-      if (normalizedDecision == 'NO_GO' &&
-          (reason == null || reason.trim().isEmpty)) {
-        _log.w('No-Go requires a reason.');
-        throw AppFailure('No-Go requires a reason.');
-      }
-
-      if (normalizedDecision == 'GO') {
-        final issues = await validatePreflightCompletion(flightId);
-
-        if (issues.isNotEmpty) {
-          _log.w(issues.join('\n'));
-          throw AppFailure(issues.join('\n'));
+        if (normalizedDecision != FinalDecision.go &&
+            normalizedDecision != FinalDecision.noGo) {
+          _log.w('Decision must be GO or NO_GO.');
+          throw AppFailure('Decision must be GO or NO_GO.');
         }
-      }
 
-      await transaction(() async {
-        await (update(
-          db.sorties,
-        )..where((v) => v.flightId.equals(flightId))).write(
-          SortiesCompanion(
-            finalDecision: Value(normalizedDecision),
-            decisionReason: Value(reason),
-            decisionBy: Value(decisionBy),
-            decisionAt: Value(DateTime.now()),
-            // Go: ready for post-flight (take-off and landing aren't
-            // recorded). No-Go: aborted.
-            flightStatus: normalizedDecision == 'NO_GO'
-                ? const Value('ABORTED')
-                : const Value('READY'),
-            updatedAt: Value(DateTime.now()),
-          ),
-        );
+        if (normalizedDecision == FinalDecision.noGo &&
+            (reason == null || reason.trim().isEmpty)) {
+          _log.w('No-Go requires a reason.');
+          throw AppFailure('No-Go requires a reason.');
+        }
 
-        await _insertAuditEvent(
-          entityType: 'SORTIE',
-          entityId: flightId,
-          action: normalizedDecision == 'GO' ? 'GO_DECISION' : 'NO_GO_DECISION',
-          description: reason,
-          performedBy: decisionBy,
-        );
+        if (normalizedDecision == FinalDecision.go) {
+          final issues = await validatePreflightCompletion(flightId);
 
-        await _enqueueSync(
-          entityType: 'SORTIE',
-          entityId: flightId,
-          operation: 'UPDATE',
-        );
-      });
-    });
+          if (issues.isNotEmpty) {
+            _log.w(issues.join('\n'));
+            throw AppFailure(issues.join('\n'));
+          }
+        }
+
+        await transaction(() async {
+          // Only a sortie still in pre-flight takes a decision.
+          final changed =
+              await (update(db.sorties)..where(
+                    (v) =>
+                        v.flightId.equals(flightId) &
+                        v.flightStatus.equals(FlightStatus.preflight),
+                  ))
+                  .write(
+                    SortiesCompanion(
+                      finalDecision: Value(normalizedDecision),
+                      decisionReason: Value(reason),
+                      decisionBy: Value(decisionBy),
+                      decisionAt: Value(DateTime.now()),
+                      // Go: ready for post-flight (take-off and landing aren't
+                      // recorded). No-Go: aborted.
+                      flightStatus: normalizedDecision == FinalDecision.noGo
+                          ? const Value(FlightStatus.aborted)
+                          : const Value(FlightStatus.ready),
+                      updatedAt: Value(DateTime.now()),
+                    ),
+                  );
+          if (changed == 0) {
+            throw AppFailure(
+              'This sortie was already updated. Go back and open it again.',
+            );
+          }
+
+          await insertAuditEvent(
+            entityType: 'SORTIE',
+            entityId: flightId,
+            action: normalizedDecision == FinalDecision.go
+                ? 'GO_DECISION'
+                : 'NO_GO_DECISION',
+            description: reason,
+            performedBy: decisionBy,
+          );
+
+          await enqueueSync(
+            entityType: 'SORTIE',
+            entityId: flightId,
+            operation: 'UPDATE',
+          );
+        });
+      }),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -1566,67 +1612,70 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
     required String performedBy,
   }) async {
     _log.t('markFlightInProgress(flightId: $flightId)');
-    return _log.trace('markFlightInProgress', () async {
-      final sortie = await _requireSortie(flightId);
+    return _log.trace(
+      'markFlightInProgress',
+      () => transaction(() async {
+        final sortie = await _requireSortie(flightId);
 
-      if (sortie.flightStatus == 'CLOSED') {
-        _log.w('Cannot start a closed sortie.');
-        throw AppFailure('Cannot start a closed sortie.');
-      }
+        if (sortie.flightStatus == FlightStatus.closed) {
+          _log.w('Cannot start a closed sortie.');
+          throw AppFailure('Cannot start a closed sortie.');
+        }
 
-      if (sortie.flightStatus == 'ABORTED') {
-        _log.w('Cannot start an aborted sortie.');
-        throw AppFailure('Cannot start an aborted sortie.');
-      }
+        if (sortie.flightStatus == FlightStatus.aborted) {
+          _log.w('Cannot start an aborted sortie.');
+          throw AppFailure('Cannot start an aborted sortie.');
+        }
 
-      if (sortie.flightStatus == 'IN_PROGRESS') {
-        _log.w('Flight is already in progress.');
-        throw AppFailure('Flight is already in progress.');
-      }
+        if (sortie.flightStatus == FlightStatus.inProgress) {
+          _log.w('Flight is already in progress.');
+          throw AppFailure('Flight is already in progress.');
+        }
 
-      if (sortie.flightStatus == 'FLOWN') {
-        _log.w('Flight has already been flown.');
-        throw AppFailure('Flight has already been flown.');
-      }
+        if (sortie.flightStatus == FlightStatus.flown) {
+          _log.w('Flight has already been flown.');
+          throw AppFailure('Flight has already been flown.');
+        }
 
-      if (sortie.finalDecision != 'GO') {
-        _log.w('Cannot start flight without GO decision.');
-        throw AppFailure('Cannot start flight without GO decision.');
-      }
+        if (sortie.finalDecision != FinalDecision.go) {
+          _log.w('Cannot start flight without GO decision.');
+          throw AppFailure('Cannot start flight without GO decision.');
+        }
 
-      final issues = await validatePreflightCompletion(flightId);
+        final issues = await validatePreflightCompletion(flightId);
 
-      if (issues.isNotEmpty) {
-        _log.w(issues.join('\n'));
-        throw AppFailure(issues.join('\n'));
-      }
+        if (issues.isNotEmpty) {
+          _log.w(issues.join('\n'));
+          throw AppFailure(issues.join('\n'));
+        }
 
-      await transaction(() async {
-        await (update(
-          db.sorties,
-        )..where((v) => v.flightId.equals(flightId))).write(
-          SortiesCompanion(
-            flightStatus: const Value('IN_PROGRESS'),
-            takeoffAt: Value(takeoffAt ?? DateTime.now()),
-            updatedAt: Value(DateTime.now()),
-          ),
-        );
+        await transaction(() async {
+          await (update(
+            db.sorties,
+          )..where((v) => v.flightId.equals(flightId))).write(
+            SortiesCompanion(
+              flightStatus: const Value(FlightStatus.inProgress),
+              takeoffAt: Value(takeoffAt ?? DateTime.now()),
+              updatedAt: Value(DateTime.now()),
+            ),
+          );
 
-        await _insertAuditEvent(
-          entityType: 'SORTIE',
-          entityId: flightId,
-          action: 'TAKEOFF_RECORDED',
-          description: 'Flight marked in progress',
-          performedBy: performedBy,
-        );
+          await insertAuditEvent(
+            entityType: 'SORTIE',
+            entityId: flightId,
+            action: 'TAKEOFF_RECORDED',
+            description: 'Flight marked in progress',
+            performedBy: performedBy,
+          );
 
-        await _enqueueSync(
-          entityType: 'SORTIE',
-          entityId: flightId,
-          operation: 'UPDATE',
-        );
-      });
-    });
+          await enqueueSync(
+            entityType: 'SORTIE',
+            entityId: flightId,
+            operation: 'UPDATE',
+          );
+        });
+      }),
+    );
   }
 
   Future<void> recordLanding({
@@ -1635,48 +1684,53 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
     required String performedBy,
   }) async {
     _log.t('recordLanding(flightId: $flightId)');
-    return _log.trace('recordLanding', () async {
-      final sortie = await _requireSortie(flightId);
+    return _log.trace(
+      'recordLanding',
+      () => transaction(() async {
+        final sortie = await _requireSortie(flightId);
 
-      if (sortie.flightStatus != 'IN_PROGRESS') {
-        _log.w('Cannot record landing unless flight is in progress.');
-        throw AppFailure('Cannot record landing unless flight is in progress.');
-      }
+        if (sortie.flightStatus != FlightStatus.inProgress) {
+          _log.w('Cannot record landing unless flight is in progress.');
+          throw AppFailure(
+            'Cannot record landing unless flight is in progress.',
+          );
+        }
 
-      final resolvedLandingAt = landingAt ?? DateTime.now();
+        final resolvedLandingAt = landingAt ?? DateTime.now();
 
-      if (sortie.takeoffAt != null &&
-          resolvedLandingAt.isBefore(sortie.takeoffAt!)) {
-        _log.w('Landing time cannot be before takeoff time.');
-        throw AppFailure('Landing time cannot be before takeoff time.');
-      }
+        if (sortie.takeoffAt != null &&
+            resolvedLandingAt.isBefore(sortie.takeoffAt!)) {
+          _log.w('Landing time cannot be before takeoff time.');
+          throw AppFailure('Landing time cannot be before takeoff time.');
+        }
 
-      await transaction(() async {
-        await (update(
-          db.sorties,
-        )..where((v) => v.flightId.equals(flightId))).write(
-          SortiesCompanion(
-            flightStatus: const Value('FLOWN'),
-            landingAt: Value(resolvedLandingAt),
-            updatedAt: Value(DateTime.now()),
-          ),
-        );
+        await transaction(() async {
+          await (update(
+            db.sorties,
+          )..where((v) => v.flightId.equals(flightId))).write(
+            SortiesCompanion(
+              flightStatus: const Value(FlightStatus.flown),
+              landingAt: Value(resolvedLandingAt),
+              updatedAt: Value(DateTime.now()),
+            ),
+          );
 
-        await _insertAuditEvent(
-          entityType: 'SORTIE',
-          entityId: flightId,
-          action: 'LANDING_RECORDED',
-          description: 'Landing recorded',
-          performedBy: performedBy,
-        );
+          await insertAuditEvent(
+            entityType: 'SORTIE',
+            entityId: flightId,
+            action: 'LANDING_RECORDED',
+            description: 'Landing recorded',
+            performedBy: performedBy,
+          );
 
-        await _enqueueSync(
-          entityType: 'SORTIE',
-          entityId: flightId,
-          operation: 'UPDATE',
-        );
-      });
-    });
+          await enqueueSync(
+            entityType: 'SORTIE',
+            entityId: flightId,
+            operation: 'UPDATE',
+          );
+        });
+      }),
+    );
   }
 
   Future<void> abortSortie({
@@ -1685,50 +1739,53 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
     required String performedBy,
   }) async {
     _log.t('abortSortie(flightId: $flightId)');
-    return _log.trace('abortSortie', () async {
-      final sortie = await _requireSortie(flightId);
+    return _log.trace(
+      'abortSortie',
+      () => transaction(() async {
+        final sortie = await _requireSortie(flightId);
 
-      if (sortie.flightStatus == 'CLOSED') {
-        _log.w('Cannot abort a closed sortie.');
-        throw AppFailure('Cannot abort a closed sortie.');
-      }
+        if (sortie.flightStatus == FlightStatus.closed) {
+          _log.w('Cannot abort a closed sortie.');
+          throw AppFailure('Cannot abort a closed sortie.');
+        }
 
-      if (sortie.flightStatus == 'ABORTED') {
-        _log.w('Sortie is already aborted.');
-        throw AppFailure('Sortie is already aborted.');
-      }
+        if (sortie.flightStatus == FlightStatus.aborted) {
+          _log.w('Sortie is already aborted.');
+          throw AppFailure('Sortie is already aborted.');
+        }
 
-      if (sortie.flightStatus == 'FLOWN') {
-        _log.w('Cannot abort a sortie after landing.');
-        throw AppFailure('Cannot abort a sortie after landing.');
-      }
+        if (sortie.flightStatus == FlightStatus.flown) {
+          _log.w('Cannot abort a sortie after landing.');
+          throw AppFailure('Cannot abort a sortie after landing.');
+        }
 
-      await transaction(() async {
-        await (update(
-          db.sorties,
-        )..where((v) => v.flightId.equals(flightId))).write(
-          SortiesCompanion(
-            flightStatus: const Value('ABORTED'),
-            decisionReason: Value(reason),
-            updatedAt: Value(DateTime.now()),
-          ),
-        );
+        await transaction(() async {
+          await (update(
+            db.sorties,
+          )..where((v) => v.flightId.equals(flightId))).write(
+            SortiesCompanion(
+              flightStatus: const Value(FlightStatus.aborted),
+              decisionReason: Value(reason),
+              updatedAt: Value(DateTime.now()),
+            ),
+          );
 
-        await _insertAuditEvent(
-          entityType: 'SORTIE',
-          entityId: flightId,
-          action: 'ABORT',
-          description: reason,
-          performedBy: performedBy,
-        );
+          await insertAuditEvent(
+            entityType: 'SORTIE',
+            entityId: flightId,
+            action: 'ABORT',
+            description: reason,
+            performedBy: performedBy,
+          );
 
-        await _enqueueSync(
-          entityType: 'SORTIE',
-          entityId: flightId,
-          operation: 'UPDATE',
-        );
-      });
-    });
+          await enqueueSync(
+            entityType: 'SORTIE',
+            entityId: flightId,
+            operation: 'UPDATE',
+          );
+        });
+      }),
+    );
   }
 
   Future<Sorty> _requireSortie(String flightId) async {
@@ -1745,7 +1802,7 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
   Future<void> _ensureSortieEditable(String flightId) async {
     final sortie = await _requireSortie(flightId);
 
-    if (sortie.flightStatus != 'PREFLIGHT') {
+    if (sortie.flightStatus != FlightStatus.preflight) {
       _log.w('Sortie is not editable because it is ${sortie.flightStatus}.');
       throw AppFailure(
         'Sortie is not editable because it is ${sortie.flightStatus}.',
@@ -1860,38 +1917,5 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
     return (update(db.fieldSessions)
           ..where((v) => v.sessionId.equals(sessionId)))
         .write(FieldSessionsCompanion(updatedAt: Value(DateTime.now())));
-  }
-
-  Future<void> _insertAuditEvent({
-    required String entityType,
-    required String entityId,
-    required String action,
-    String? description,
-    required String performedBy,
-  }) {
-    return into(db.auditEvents).insert(
-      AuditEventsCompanion.insert(
-        entityType: entityType,
-        entityId: entityId,
-        action: action,
-        description: Value(description),
-        performedBy: performedBy,
-      ),
-    );
-  }
-
-  Future<void> _enqueueSync({
-    required String entityType,
-    required String entityId,
-    required String operation,
-  }) {
-    return into(db.syncQueue).insert(
-      SyncQueueCompanion.insert(
-        entityType: entityType,
-        entityId: entityId,
-        operation: operation,
-        syncStatus: const Value('PENDING'),
-      ),
-    );
   }
 }

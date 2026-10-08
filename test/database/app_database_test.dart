@@ -6,7 +6,11 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/open.dart';
 import 'package:the_audit/core/database/app_database.dart';
-import 'package:the_audit/core/database/checklists/common_preflight.dart';
+import 'package:the_audit/core/database/dao_write_helpers.dart';
+import 'package:the_audit/core/database/seed/checklists.dart';
+import 'package:the_audit/core/database/seed/default_equipment.dart';
+import 'package:the_audit/core/database/seed/default_fleet.dart';
+import 'package:the_audit/core/database/seed/default_payloads.dart';
 import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/core/database/dtos/equipment_dtos.dart';
 import 'package:the_audit/core/errors/app_failure.dart';
@@ -777,6 +781,244 @@ void main() {
     });
   });
 
+  group('data integrity', () {
+    late AppDatabase db;
+    late String sessionId;
+    late String sessionVehicleId;
+    tearDown(() => db.close());
+
+    setUp(() async {
+      db = AppDatabase.forTesting(NativeDatabase.memory());
+      await db
+          .into(db.users)
+          .insert(
+            UsersCompanion.insert(
+              id: 'u1',
+              name: 'Tester',
+              role: 'PIC',
+              email: 'tester@example.com',
+            ),
+          );
+      final kari = (await db.vehicleDao.getActiveVehicles()).firstWhere(
+        (v) => v.name == 'Kari',
+      );
+      sessionId = await db.preFieldDao.createFieldSession(
+        date: DateTime(2026, 10, 9),
+        locationName: 'Test site',
+        latitude: 12.97,
+        longitude: 77.59,
+        missionType: 'TESTING',
+        sessionStatus: SessionStatus.planned,
+        createdBy: 'u1',
+      );
+      sessionVehicleId = await db.preFieldDao.addVehicleToSession(
+        sessionId: sessionId,
+        vehicleId: kari.id,
+        quantity: 2,
+        performedBy: 'u1',
+      );
+    });
+
+    Future<String> createSortie() => db.preFlightDao.createSortie(
+      sessionId: sessionId,
+      sessionVehicleId: sessionVehicleId,
+      picUserId: 'u1',
+      performedBy: 'u1',
+    );
+
+    Future<void> passBlockingItems(String flightId) async {
+      for (final item
+          in await db.preFlightDao.loadBlockingChecklistItemsForSortie(
+            flightId,
+          )) {
+        final isNumber = item.responseType == ChecklistResponseTypes.number;
+        await db.preFlightDao.saveChecklistResponse(
+          flightId: flightId,
+          itemId: item.id,
+          response: isNumber ? 'VALUE' : 'PASS',
+          valueNumber: isNumber ? 25.2 : null,
+          createdBy: 'u1',
+        );
+      }
+    }
+
+    test('two sorties created at once get different numbers', () async {
+      final ids = await Future.wait([createSortie(), createSortie()]);
+      final sorties = await db.preFlightDao.getSortiesForSession(sessionId);
+      expect(sorties.map((s) => s.flightId), unorderedEquals(ids));
+      expect(sorties.map((s) => s.sequenceNo), [1, 2]);
+    });
+
+    test('a second Go on the same sortie is refused', () async {
+      final flightId = await createSortie();
+      await passBlockingItems(flightId);
+      Future<void> go() => db.preFlightDao.submitGoNoGoDecision(
+        flightId: flightId,
+        decision: FinalDecision.go,
+        decisionBy: 'u1',
+      );
+      await go();
+      await expectLater(go(), throwsA(isA<AppFailure>()));
+    });
+
+    test('statuses outside the fixed lists are rejected', () async {
+      final flightId = await createSortie();
+      await expectLater(
+        db.customStatement(
+          "UPDATE sorties SET flight_status = 'CLOSD' WHERE flight_id = ?",
+          [flightId],
+        ),
+        throwsA(anything),
+      );
+      await expectLater(
+        db.customStatement(
+          "UPDATE field_sessions SET session_status = 'DONE' "
+          'WHERE session_id = ?',
+          [sessionId],
+        ),
+        throwsA(anything),
+      );
+    });
+
+    test('each record keeps one pending upload row', () async {
+      final flightId = await createSortie();
+      final item = (await db.preFlightDao.loadBlockingChecklistItemsForSortie(
+        flightId,
+      )).firstWhere((i) => i.responseType == ChecklistResponseTypes.passFail);
+      for (final answer in ['PASS', 'FAIL', 'PASS']) {
+        await db.preFlightDao.saveChecklistResponse(
+          flightId: flightId,
+          itemId: item.id,
+          response: answer,
+          createdBy: 'u1',
+        );
+      }
+      final response = (await db.select(db.checklistResponses).get()).single;
+      final rows = await (db.select(
+        db.syncQueue,
+      )..where((q) => q.entityType.equals('CHECKLIST_RESPONSE'))).get();
+      // Queued by the row's real id, once, still as the first INSERT.
+      expect(rows.single.entityId, response.id);
+      expect(rows.single.operation, DbSyncOperations.insert);
+    });
+
+    test('pending uploads merge into one operation', () {
+      expect(mergeSyncOperations('INSERT', 'UPDATE'), 'INSERT');
+      expect(mergeSyncOperations('INSERT', 'DELETE'), isNull);
+      expect(mergeSyncOperations('UPDATE', 'DELETE'), 'DELETE');
+      expect(mergeSyncOperations('DELETE', 'INSERT'), 'UPDATE');
+      expect(mergeSyncOperations('UPDATE', 'UPDATE'), 'UPDATE');
+    });
+
+    test('audit events carry their session and sortie', () async {
+      final flightId = await createSortie();
+      await passBlockingItems(flightId);
+
+      final trail = await db.recordDao.getAuditTrailForSession(sessionId);
+      final answers = trail.where((e) => e.entityType == 'CHECKLIST_RESPONSE');
+      expect(answers, isNotEmpty);
+      expect(answers.every((e) => e.flightId == flightId), isTrue);
+      // Session-level events (vehicle added) are in the trail too.
+      expect(trail.map((e) => e.entityType), contains('SESSION_VEHICLE'));
+    });
+
+    test('the sortie list updates itself', () async {
+      final updates = db.preFlightDao.watchSortiesForSession(sessionId);
+      final seen = <int>[];
+      final sub = updates.listen((sorties) => seen.add(sorties.length));
+      await pumpEventQueue();
+      await createSortie();
+      await pumpEventQueue();
+      await sub.cancel();
+      expect(seen.first, 0);
+      expect(seen.last, 1);
+    });
+  });
+
+  test(
+    'default ids are pinned: namespace and key format never change',
+    () async {
+      // Worked out independently (Python's uuid5, RFC 4122). If this fails,
+      // the seed namespace or a key format changed, and new installs would no
+      // longer match existing ones.
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+
+      final cerana = await (db.select(
+        db.vehicles,
+      )..where((v) => v.name.equals('Cerana'))).getSingle();
+      expect(cerana.id, 'fb4ef5f8-a66a-58a2-8483-cabad91a0c53');
+
+      final template =
+          await (db.select(db.vehicleChecklistTemplates)..where(
+                (t) => t.vehicleId.equals(cerana.id) & t.version.equals(1),
+              ))
+              .getSingle();
+      expect(template.id, 'f3844cb9-2a21-584c-817b-627530076f6c');
+
+      final jetson = await (db.select(
+        db.payloads,
+      )..where((p) => p.name.equals('Jetson Orin Nano 8GB'))).getSingle();
+      expect(jetson.payloadId, 'e7ff6288-f41f-5390-b2b5-32e9c99d6403');
+
+      final fuselage =
+          await (db.select(db.equipmentTemplateItems)..where(
+                (e) =>
+                    e.vehicleId.equals(cerana.id) & e.name.equals('Fuselage'),
+              ))
+              .getSingle();
+      expect(fuselage.id, '45955156-c107-5431-be71-45a3ad733a24');
+    },
+  );
+
+  test('every seed key is unique', () {
+    expect(seedFleet.map((v) => v.key).toSet(), hasLength(seedFleet.length));
+    expect(
+      seedPayloads.map((p) => p.key).toSet(),
+      hasLength(seedPayloads.length),
+    );
+    // Equipment ids come from list + category + name: those must be unique.
+    final lists = {
+      'tools': [('Tools', seedTools)],
+      ...seedVehicleEquipment,
+    };
+    for (final MapEntry(key: list, value: categories) in lists.entries) {
+      final names = [
+        for (final (category, items) in categories)
+          for (final (name, _, _) in items) '$category:$name',
+      ];
+      expect(names.toSet(), hasLength(names.length), reason: list);
+    }
+    // Every list and payload limit names a real fleet vehicle.
+    final vehicleKeys = {for (final v in seedFleet) v.key};
+    expect(vehicleKeys, containsAll(seedVehicleEquipment.keys));
+    for (final payload in seedPayloads) {
+      expect(vehicleKeys, containsAll(payload.onlyVehicles));
+    }
+  });
+
+  test('default data has the same ids on every install', () async {
+    final first = AppDatabase.forTesting(NativeDatabase.memory());
+    final second = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(first.close);
+    addTearDown(second.close);
+
+    Future<Map<String, String>> ids(AppDatabase db) async => {
+      for (final v in await db.select(db.vehicles).get()) 'v:${v.name}': v.id,
+      for (final t in await db.select(db.vehicleChecklistTemplates).get())
+        't:${t.vehicleId}:${t.version}': t.id,
+      for (final i in await db.select(db.checklistItems).get())
+        'i:${i.templateId}:${i.label}': i.id,
+      for (final p in await db.select(db.payloads).get())
+        'p:${p.name}': p.payloadId,
+      for (final e in await db.select(db.equipmentTemplateItems).get())
+        'e:${e.vehicleId}:${e.category}:${e.sortOrder}': e.id,
+    };
+    final a = await ids(first);
+    expect(a, isNotEmpty);
+    expect(await ids(second), a);
+  });
+
   test('upgrading to v11 makes sorties with a saved Go READY', () async {
     final dir = await Directory.systemTemp.createTemp('the_audit_test');
     final file = File('${dir.path}/the_audit.db');
@@ -832,6 +1074,11 @@ void main() {
     await v10.customStatement(
       'ALTER TABLE post_flight_notes DROP COLUMN landed_battery_percent',
     );
+    // v13 added the audit scope columns (and their indexes).
+    for (final scope in ['session_id', 'flight_id']) {
+      await v10.customStatement('DROP INDEX idx_audit_events_$scope');
+      await v10.customStatement('ALTER TABLE audit_events DROP COLUMN $scope');
+    }
     await v10.customStatement('PRAGMA user_version = 10');
     await v10.close();
 
@@ -892,6 +1139,11 @@ void main() {
       await v2.customStatement(
         'ALTER TABLE post_flight_notes DROP COLUMN landed_battery_percent',
       );
+      // v13 added the audit scope columns (and their indexes).
+      for (final scope in ['session_id', 'flight_id']) {
+        await v2.customStatement('DROP INDEX idx_audit_events_$scope');
+        await v2.customStatement('ALTER TABLE audit_events DROP COLUMN $scope');
+      }
       await v2.customStatement('PRAGMA user_version = 2');
       await v2.close();
 

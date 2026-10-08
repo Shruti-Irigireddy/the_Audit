@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart';
+import 'package:the_audit/core/database/dao_write_helpers.dart';
 import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/database/database_constants.dart';
@@ -31,7 +32,7 @@ final _uuid = Uuid();
   ],
 )
 class PreFieldDao extends DatabaseAccessor<AppDatabase>
-    with _$PreFieldDaoMixin {
+    with _$PreFieldDaoMixin, DaoWriteHelpers {
   PreFieldDao(super.db);
 
   static const _log = AppLogger('PreFieldDao');
@@ -65,7 +66,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'FIELD_SESSION',
           entityId: resolvedSessionId,
           action: 'CREATE',
@@ -73,7 +74,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: createdBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'FIELD_SESSION',
           entityId: resolvedSessionId,
           operation: 'INSERT',
@@ -119,7 +120,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'FIELD_SESSION',
           entityId: sessionId,
           action: 'UPDATE',
@@ -127,7 +128,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'FIELD_SESSION',
           entityId: sessionId,
           operation: 'UPDATE',
@@ -146,7 +147,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
   Future<List<FieldSession>> getInProgressFieldSessions() {
     _log.t('getInProgressFieldSessions()');
     return (select(db.fieldSessions)
-          ..where((v) => v.sessionStatus.equals('IN_PROGRESS'))
+          ..where((v) => v.sessionStatus.equals(SessionStatus.inProgress))
           ..orderBy([(v) => OrderingTerm.desc(v.updatedAt)]))
         .get();
   }
@@ -156,58 +157,68 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
     required String closedBy,
   }) async {
     _log.t('closeFieldSession(sessionId: $sessionId)');
-    return _log.trace('closeFieldSession', () async {
-      final session = await _requireFieldSession(sessionId);
+    return _log.trace(
+      'closeFieldSession',
+      () => transaction(() async {
+        final session = await _requireFieldSession(sessionId);
 
-      if (session.sessionStatus == 'CLOSED') {
-        _log.w('Field session is already closed: $sessionId');
-        throw AppFailure('Field session is already closed: $sessionId');
-      }
+        if (session.sessionStatus == SessionStatus.closed) {
+          _log.w('Field session is already closed: $sessionId');
+          throw AppFailure('Field session is already closed: $sessionId');
+        }
 
-      // Every sortie must be finished: closed after post-flight, or aborted.
-      final openSorties =
-          await (select(db.sorties)..where(
-                (s) =>
-                    s.sessionId.equals(sessionId) &
-                    s.flightStatus.isNotIn(const ['CLOSED', 'ABORTED']),
-              ))
-              .get();
-      if (openSorties.isNotEmpty) {
-        _log.w('${openSorties.length} sortie(s) still open in $sessionId');
-        throw AppFailure(
-          'Close every sortie first (${openSorties.length} still open).',
-        );
-      }
+        // Every sortie must be finished: closed after post-flight, or aborted.
+        final openSorties =
+            await (select(db.sorties)..where(
+                  (s) =>
+                      s.sessionId.equals(sessionId) &
+                      s.flightStatus.isNotIn(FlightStatus.finished),
+                ))
+                .get();
+        if (openSorties.isNotEmpty) {
+          _log.w('${openSorties.length} sortie(s) still open in $sessionId');
+          throw AppFailure(
+            'Close every sortie first (${openSorties.length} still open).',
+          );
+        }
 
-      final now = DateTime.now();
+        final now = DateTime.now();
 
-      await transaction(() async {
-        await (update(
-          db.fieldSessions,
-        )..where((v) => v.sessionId.equals(sessionId))).write(
-          FieldSessionsCompanion(
-            sessionStatus: const Value('CLOSED'),
-            closedAt: Value(now),
-            closedBy: Value(closedBy),
-            updatedAt: Value(now),
-          ),
-        );
+        await transaction(() async {
+          final changed =
+              await (update(db.fieldSessions)..where(
+                    (v) =>
+                        v.sessionId.equals(sessionId) &
+                        v.sessionStatus.equals(SessionStatus.closed).not(),
+                  ))
+                  .write(
+                    FieldSessionsCompanion(
+                      sessionStatus: const Value(SessionStatus.closed),
+                      closedAt: Value(now),
+                      closedBy: Value(closedBy),
+                      updatedAt: Value(now),
+                    ),
+                  );
+          if (changed == 0) {
+            throw AppFailure('This session is already closed.');
+          }
 
-        await _insertAuditEvent(
-          entityType: 'FIELD_SESSION',
-          entityId: sessionId,
-          action: 'CLOSE',
-          description: 'Field session closed',
-          performedBy: closedBy,
-        );
+          await insertAuditEvent(
+            entityType: 'FIELD_SESSION',
+            entityId: sessionId,
+            action: 'CLOSE',
+            description: 'Field session closed',
+            performedBy: closedBy,
+          );
 
-        await _enqueueSync(
-          entityType: 'FIELD_SESSION',
-          entityId: sessionId,
-          operation: 'UPDATE',
-        );
-      });
-    });
+          await enqueueSync(
+            entityType: 'FIELD_SESSION',
+            entityId: sessionId,
+            operation: 'UPDATE',
+          );
+        });
+      }),
+    );
   }
 
   Future<String> addUserToSession({
@@ -237,7 +248,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SESSION_USER',
           entityId: sessionUserId,
           action: 'CREATE',
@@ -245,7 +256,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SESSION_USER',
           entityId: sessionUserId,
           operation: 'INSERT',
@@ -278,7 +289,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionUser.sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SESSION_USER',
           entityId: sessionUserId,
           action: 'DELETE',
@@ -286,7 +297,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SESSION_USER',
           entityId: sessionUserId,
           operation: 'DELETE',
@@ -332,7 +343,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'FIELD_SESSION',
           entityId: sessionId,
           action: 'REPLACE_SESSION_USERS',
@@ -340,7 +351,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'FIELD_SESSION',
           entityId: sessionId,
           operation: 'UPDATE',
@@ -436,7 +447,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SESSION_VEHICLE',
           entityId: sessionVehicleId,
           action: 'CREATE',
@@ -444,7 +455,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SESSION_VEHICLE',
           entityId: sessionVehicleId,
           operation: 'INSERT',
@@ -490,7 +501,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionVehicle.sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SESSION_VEHICLE',
           entityId: sessionVehicleId,
           action: 'DELETE',
@@ -498,7 +509,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SESSION_VEHICLE',
           entityId: sessionVehicleId,
           operation: 'DELETE',
@@ -525,7 +536,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionVehicle.sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SESSION_VEHICLE',
           entityId: sessionVehicleId,
           action: 'UPDATE_OBJECTIVE',
@@ -533,7 +544,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SESSION_VEHICLE',
           entityId: sessionVehicleId,
           operation: 'UPDATE',
@@ -602,7 +613,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'FIELD_SESSION',
           entityId: sessionId,
           action: 'REPLACE_SESSION_VEHICLES',
@@ -610,7 +621,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'FIELD_SESSION',
           entityId: sessionId,
           operation: 'UPDATE',
@@ -721,7 +732,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionVehicle.sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SESSION_VEHICLE_PAYLOAD',
           entityId: id,
           action: 'CREATE',
@@ -729,7 +740,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SESSION_VEHICLE_PAYLOAD',
           entityId: id,
           operation: 'INSERT',
@@ -775,7 +786,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionVehicle.sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SESSION_VEHICLE_PAYLOAD',
           entityId: payloadAssignment.id,
           action: 'DELETE',
@@ -783,7 +794,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SESSION_VEHICLE_PAYLOAD',
           entityId: payloadAssignment.id,
           operation: 'DELETE',
@@ -822,7 +833,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionVehicle.sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SESSION_VEHICLE',
           entityId: sessionVehicleId,
           action: 'REPLACE_PAYLOADS',
@@ -830,7 +841,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SESSION_VEHICLE',
           entityId: sessionVehicleId,
           operation: 'UPDATE',
@@ -977,7 +988,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SESSION_BATTERY',
           entityId: id,
           action: 'CREATE',
@@ -985,7 +996,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SESSION_BATTERY',
           entityId: id,
           operation: 'INSERT',
@@ -1018,7 +1029,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionBattery.sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SESSION_BATTERY',
           entityId: sessionBatteryId,
           action: 'DELETE',
@@ -1026,7 +1037,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SESSION_BATTERY',
           entityId: sessionBatteryId,
           operation: 'DELETE',
@@ -1069,7 +1080,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'FIELD_SESSION',
           entityId: sessionId,
           action: 'REPLACE_BATTERIES',
@@ -1077,7 +1088,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'FIELD_SESSION',
           entityId: sessionId,
           operation: 'UPDATE',
@@ -1165,7 +1176,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'FIELD_SESSION',
           entityId: sessionId,
           action: 'CREATE_EQUIPMENT_CHECKS',
@@ -1173,7 +1184,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: checkedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'FIELD_SESSION',
           entityId: sessionId,
           operation: 'UPDATE',
@@ -1218,7 +1229,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(equipmentCheck.sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SESSION_EQUIPMENT_CHECK',
           entityId: equipmentCheckId,
           action: 'UPDATE',
@@ -1226,7 +1237,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: checkedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SESSION_EQUIPMENT_CHECK',
           entityId: equipmentCheckId,
           operation: 'UPDATE',
@@ -1308,7 +1319,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
 
         await _touchSession(sessionId);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SESSION_EQUIPMENT_CHECK',
           entityId: id,
           action: 'CREATE',
@@ -1316,7 +1327,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: checkedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SESSION_EQUIPMENT_CHECK',
           entityId: id,
           operation: 'INSERT',
@@ -1362,7 +1373,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'EQUIPMENT_ITEM',
           entityId: resolvedId,
           action: 'CREATE',
@@ -1370,7 +1381,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'EQUIPMENT_ITEM',
           entityId: resolvedId,
           operation: 'INSERT',
@@ -1405,7 +1416,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'EQUIPMENT_ITEM',
           entityId: equipmentId,
           action: 'UPDATE',
@@ -1413,7 +1424,7 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'EQUIPMENT_ITEM',
           entityId: equipmentId,
           operation: 'UPDATE',
@@ -1548,39 +1559,6 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
     }
 
     return sessionVehicle;
-  }
-
-  Future<void> _insertAuditEvent({
-    required String entityType,
-    required String entityId,
-    required String action,
-    String? description,
-    required String performedBy,
-  }) {
-    return into(db.auditEvents).insert(
-      AuditEventsCompanion.insert(
-        entityType: entityType,
-        entityId: entityId,
-        action: action,
-        description: Value(description),
-        performedBy: performedBy,
-      ),
-    );
-  }
-
-  Future<void> _enqueueSync({
-    required String entityType,
-    required String entityId,
-    required String operation,
-  }) {
-    return into(db.syncQueue).insert(
-      SyncQueueCompanion.insert(
-        entityType: entityType,
-        entityId: entityId,
-        operation: operation,
-        syncStatus: const Value('PENDING'),
-      ),
-    );
   }
 
   Future<void> _touchSession(String sessionId) {

@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:bloc/bloc.dart';
 
 import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/pre_flight/domain/dtos/pre_flight_dtos.dart';
 import 'package:the_audit/features/pre_flight/domain/entities/checklist_response_entity.dart';
+import 'package:the_audit/features/pre_flight/domain/entities/sortie_entity.dart';
 import 'package:the_audit/features/pre_flight/domain/repositories/pre_flight_repository.dart';
 import 'package:the_audit/features/vehicle/domain/entities/checklist_item_entity.dart';
 import 'pre_flight_state.dart';
@@ -14,6 +17,35 @@ class PreFlightCubit extends Cubit<PreFlightState> {
   final PreFlightRepository _repository;
 
   PreFlightCubit(this._repository) : super(PreFlightState.initial());
+
+  StreamSubscription<List<SortieEntity>>? _sortiesWatch;
+
+  /// Keeps [PreFlightState.sorties] in step with the database: the list
+  /// updates itself after a sortie is created, decided or closed.
+  void watchSortiesForSession(String sessionId) {
+    _log.t('watchSortiesForSession($sessionId)');
+    _sortiesWatch?.cancel();
+    _sortiesWatch = _repository
+        .watchSortiesForSession(sessionId)
+        .listen(
+          (sorties) => emit(
+            state.copyWith(
+              viewStatus: PreFlightViewStatus.loaded,
+              sorties: sorties,
+            ),
+          ),
+          onError: (Object error, StackTrace stackTrace) {
+            _log.e('watchSortiesForSession failed', error, stackTrace);
+            _emitFailure(error);
+          },
+        );
+  }
+
+  @override
+  Future<void> close() async {
+    await _sortiesWatch?.cancel();
+    return super.close();
+  }
 
   Future<void> loadSortiesForSession(String sessionId) async {
     _log.t('loadSortiesForSession($sessionId)');
@@ -782,11 +814,10 @@ class PreFlightCubit extends Cubit<PreFlightState> {
 
   Future<void> markFlightInProgress({
     required String flightId,
-    String flightStatus = 'IN_PROGRESS',
     DateTime? takeoffAt,
     required String performedBy,
   }) async {
-    _log.i('markFlightInProgress($flightId, status: $flightStatus)');
+    _log.i('markFlightInProgress($flightId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -797,7 +828,6 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     try {
       await _repository.markFlightInProgress(
         flightId: flightId,
-        flightStatus: flightStatus,
         takeoffAt: takeoffAt,
         performedBy: performedBy,
       );
@@ -810,11 +840,10 @@ class PreFlightCubit extends Cubit<PreFlightState> {
 
   Future<void> recordLanding({
     required String flightId,
-    String flightStatus = 'LANDED',
     DateTime? landingAt,
     required String performedBy,
   }) async {
-    _log.i('recordLanding($flightId, status: $flightStatus)');
+    _log.i('recordLanding($flightId)');
     emit(
       state.copyWith(
         viewStatus: PreFlightViewStatus.saving,
@@ -825,7 +854,6 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     try {
       await _repository.recordLanding(
         flightId: flightId,
-        flightStatus: flightStatus,
         landingAt: landingAt,
         performedBy: performedBy,
       );

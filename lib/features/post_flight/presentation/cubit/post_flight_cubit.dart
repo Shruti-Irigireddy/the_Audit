@@ -1,5 +1,6 @@
 import 'package:bloc/bloc.dart';
 
+import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/post_flight/domain/dtos/post_flight_dtos.dart';
@@ -165,7 +166,7 @@ class PostFlightCubit extends Cubit<PostFlightState> {
         createdBy: performedBy,
       );
       final sortie = state.setup?.sortie;
-      if (sortie?.flightStatus != 'CLOSED') {
+      if (sortie?.flightStatus != FlightStatus.closed) {
         await _repository.closeSortie(flightId: flightId, closedBy: performedBy);
         _log.i('sortie closed: $flightId');
       }

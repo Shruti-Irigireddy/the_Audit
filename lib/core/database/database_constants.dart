@@ -57,3 +57,44 @@ class DbSyncOperations {
   static const update = 'UPDATE';
   static const delete = 'DELETE';
 }
+
+/// A sortie's life: PREFLIGHT -> READY (Go saved) -> CLOSED (post-flight),
+/// or ABORTED (No-Go). IN_PROGRESS and FLOWN come from the earlier
+/// take-off / landing flow and stay valid for older records.
+class FlightStatus {
+  static const preflight = 'PREFLIGHT';
+  static const ready = 'READY';
+  static const inProgress = 'IN_PROGRESS';
+  static const flown = 'FLOWN';
+  static const aborted = 'ABORTED';
+  static const closed = 'CLOSED';
+
+  static const all = [preflight, ready, inProgress, flown, aborted, closed];
+
+  /// Finished: the session can close once every sortie is one of these.
+  static const finished = [closed, aborted];
+}
+
+class SessionStatus {
+  static const planned = 'PLANNED';
+  static const inProgress = 'IN_PROGRESS';
+  static const closed = 'CLOSED';
+
+  static const all = [planned, inProgress, closed];
+}
+
+class FinalDecision {
+  static const go = 'GO';
+  static const noGo = 'NO_GO';
+
+  static const all = [go, noGo];
+}
+
+class FollowUpStatus {
+  static const pending = 'PENDING';
+  static const inProgress = 'IN_PROGRESS';
+  static const done = 'DONE';
+  static const cancelled = 'CANCELLED';
+
+  static const all = [pending, inProgress, done, cancelled];
+}

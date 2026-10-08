@@ -2,7 +2,6 @@
 .dart_tool/
 .packages
 build/
-pubspec.lock
 
 # Documentation
 doc/api/
@@ -73,3 +72,20 @@ migrate_working_dir/
 # Private keys: never commit
 github_shruti
 github_shruti.pub
+
+# drift: generated from drift_schemas/*.json; recreate with
+# `dart run drift_dev make-migrations`. Not used by the app.
+lib/core/database/app_database.steps.dart
+test/drift/*/generated/
+
+# Not part of the Flutter app (Android / iOS only)
+node_modules/
+/linux/
+/macos/
+/web/
+/windows/
+
+# Business documents (SRS, data sheets) stay out of the code repo
+/*.docx
+/*.pdf
+/*.xlsx

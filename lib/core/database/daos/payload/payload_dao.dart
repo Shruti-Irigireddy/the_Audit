@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:the_audit/core/database/dao_write_helpers.dart';
 import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 
@@ -21,7 +22,8 @@ const _uuid = Uuid();
     SyncQueue,
   ],
 )
-class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
+class PayloadDao extends DatabaseAccessor<AppDatabase>
+    with _$PayloadDaoMixin, DaoWriteHelpers {
   PayloadDao(super.db);
 
   static const _log = AppLogger('PayloadDao');
@@ -65,7 +67,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
           );
         }
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'PAYLOAD',
           entityId: id,
           action: 'CREATE',
@@ -73,7 +75,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'PAYLOAD',
           entityId: id,
           operation: 'INSERT',
@@ -139,6 +141,28 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
       payloadVehicles,
     )..where((t) => t.payloadId.equals(payloadId))).get();
     return [for (final row in rows) row.vehicleId];
+  }
+
+  /// Vehicle types each payload fits (payload id -> types); payloads with
+  /// no rows fit any type. One query for all payloads.
+  Future<Map<String, Set<String>>> getAllCompatibleVehicleTypes() async {
+    final rows = await select(db.payloadVehicleCompatibility).get();
+    final types = <String, Set<String>>{};
+    for (final row in rows) {
+      (types[row.payloadId] ??= {}).add(row.vehicleType.trim().toUpperCase());
+    }
+    return types;
+  }
+
+  /// Vehicles each vehicle-limited payload is limited to (payload id ->
+  /// vehicle ids). One query for all payloads.
+  Future<Map<String, Set<String>>> getAllVehicleLimits() async {
+    final rows = await select(payloadVehicles).get();
+    final limits = <String, Set<String>>{};
+    for (final row in rows) {
+      (limits[row.payloadId] ??= {}).add(row.vehicleId);
+    }
+    return limits;
   }
 
   Future<List<String>> getCompatibleVehicleTypes(String payloadId) async {
@@ -256,7 +280,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'PAYLOAD',
           entityId: payloadId,
           action: 'UPDATE',
@@ -264,7 +288,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'PAYLOAD',
           entityId: payloadId,
           operation: 'UPDATE',
@@ -318,7 +342,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
           db.payloads,
         )..where((v) => v.payloadId.equals(payloadId))).go();
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'PAYLOAD',
           entityId: payloadId,
           action: 'DELETE',
@@ -326,7 +350,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'PAYLOAD',
           entityId: payloadId,
           operation: 'DELETE',
@@ -361,7 +385,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
           );
         }
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'PAYLOAD',
           entityId: payloadId,
           action: 'REPLACE_COMPATIBILITY',
@@ -369,7 +393,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'PAYLOAD',
           entityId: payloadId,
           operation: 'UPDATE',
@@ -417,7 +441,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
           vehicleType: normalizedVehicleType,
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'PAYLOAD',
           entityId: payloadId,
           action: 'ADD_COMPATIBILITY',
@@ -425,7 +449,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'PAYLOAD',
           entityId: payloadId,
           operation: 'UPDATE',
@@ -456,7 +480,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
             ))
             .go();
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'PAYLOAD',
           entityId: payloadId,
           action: 'REMOVE_COMPATIBILITY',
@@ -464,7 +488,7 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'PAYLOAD',
           entityId: payloadId,
           operation: 'UPDATE',
@@ -512,37 +536,5 @@ class PayloadDao extends DatabaseAccessor<AppDatabase> with _$PayloadDaoMixin {
     )..where((v) => v.payloadId.equals(payloadId))).get();
 
     return sessionPayloads.length + sortiePayloads.length;
-  }
-
-  Future<void> _insertAuditEvent({
-    required String entityType,
-    required String entityId,
-    required String action,
-    String? description,
-    required String performedBy,
-  }) async {
-    await into(db.auditEvents).insert(
-      AuditEventsCompanion.insert(
-        entityType: entityType,
-        entityId: entityId,
-        action: action,
-        description: Value(description),
-        performedBy: performedBy,
-      ),
-    );
-  }
-
-  Future<void> _enqueueSync({
-    required String entityType,
-    required String entityId,
-    required String operation,
-  }) async {
-    await into(db.syncQueue).insert(
-      SyncQueueCompanion.insert(
-        entityType: entityType,
-        entityId: entityId,
-        operation: operation,
-      ),
-    );
   }
 }

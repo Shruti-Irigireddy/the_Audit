@@ -1,9 +1,10 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:the_audit/core/database/dao_write_helpers.dart';
 import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/database/app_database.dart';
-import 'package:the_audit/core/database/checklists/common_preflight.dart';
+import 'package:the_audit/core/database/seed/checklists.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/vehicle/domain/dtos/vehicle_dtos.dart';
 
@@ -20,7 +21,8 @@ const _uuid = Uuid();
     SyncQueue,
   ],
 )
-class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
+class VehicleDao extends DatabaseAccessor<AppDatabase>
+    with _$VehicleDaoMixin, DaoWriteHelpers {
   VehicleDao(super.db);
 
   static const _log = AppLogger('VehicleDao');
@@ -92,7 +94,7 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
           );
         }
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'VEHICLE',
           entityId: resolvedVehicleId,
           action: 'CREATE',
@@ -100,13 +102,13 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
           performedBy: createdByUserId,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'VEHICLE',
           entityId: resolvedVehicleId,
           operation: 'INSERT',
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'VEHICLE_CHECKLIST_TEMPLATE',
           entityId: templateId,
           operation: 'INSERT',
@@ -219,7 +221,7 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'VEHICLE',
           entityId: vehicleId,
           action: 'UPDATE',
@@ -227,7 +229,7 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'VEHICLE',
           entityId: vehicleId,
           operation: 'UPDATE',
@@ -386,7 +388,7 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
           );
         }
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'VEHICLE',
           entityId: vehicleId,
           action: 'CHECKLIST_VERSION_CREATED',
@@ -394,13 +396,13 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
           performedBy: createdBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'VEHICLE_CHECKLIST_TEMPLATE',
           entityId: newTemplateId,
           operation: 'INSERT',
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'VEHICLE',
           entityId: vehicleId,
           operation: 'UPDATE',
@@ -436,7 +438,7 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'VEHICLE_CHECKLIST_TEMPLATE',
           entityId: templateId,
           action: 'DEACTIVATE',
@@ -444,13 +446,13 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
           performedBy: deactivatedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'VEHICLE_CHECKLIST_TEMPLATE',
           entityId: templateId,
           operation: 'UPDATE',
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'VEHICLE',
           entityId: template.vehicleId,
           operation: 'UPDATE',
@@ -535,38 +537,5 @@ class VehicleDao extends DatabaseAccessor<AppDatabase> with _$VehicleDaoMixin {
       _log.w('Invalid checklist response type: $responseType');
       throw AppFailure('Invalid checklist response type: $responseType');
     }
-  }
-
-  Future<void> _insertAuditEvent({
-    required String entityType,
-    required String entityId,
-    required String action,
-    String? description,
-    required String performedBy,
-  }) {
-    return into(db.auditEvents).insert(
-      AuditEventsCompanion.insert(
-        entityType: entityType,
-        entityId: entityId,
-        action: action,
-        description: Value(description),
-        performedBy: performedBy,
-        performedAt: Value(DateTime.now()),
-      ),
-    );
-  }
-
-  Future<void> _enqueueSync({
-    required String entityType,
-    required String entityId,
-    required String operation,
-  }) {
-    return into(db.syncQueue).insert(
-      SyncQueueCompanion.insert(
-        entityType: entityType,
-        entityId: entityId,
-        operation: operation,
-      ),
-    );
   }
 }

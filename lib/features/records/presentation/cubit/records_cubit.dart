@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:bloc/bloc.dart';
 
 import 'package:the_audit/core/errors/app_failure.dart';
@@ -12,6 +14,40 @@ class RecordsCubit extends Cubit<RecordsState> {
   final RecordRepository _repository;
 
   RecordsCubit(this._repository) : super(const RecordsState());
+
+  StreamSubscription<List<FieldSessionEntity>>? _sessionsWatch;
+
+  /// Keeps [RecordsState.sessions] in step with the database.
+  void watchRecentSessions({int limit = 50}) {
+    _log.t('watchRecentSessions(limit: $limit)');
+    _sessionsWatch?.cancel();
+    _sessionsWatch = _repository
+        .watchRecentSessions(limit: limit)
+        .listen(
+          (sessions) => emit(
+            state.copyWith(
+              status: RecordsStatus.loaded,
+              sessions: sessions,
+              clearError: true,
+            ),
+          ),
+          onError: (Object error, StackTrace stackTrace) {
+            _log.e('watchRecentSessions failed', error, stackTrace);
+            emit(
+              state.copyWith(
+                status: RecordsStatus.failure,
+                errorMessage: friendlyError(error),
+              ),
+            );
+          },
+        );
+  }
+
+  @override
+  Future<void> close() async {
+    await _sessionsWatch?.cancel();
+    return super.close();
+  }
 
   Future<void> loadRecentSessions({int limit = 50}) async {
     _log.t('loadRecentSessions(limit: $limit)');

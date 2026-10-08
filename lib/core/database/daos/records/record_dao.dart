@@ -1,6 +1,8 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:the_audit/core/database/database_constants.dart';
+import 'package:the_audit/core/database/dao_write_helpers.dart';
 import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/database/dtos/shared_dtos.dart';
@@ -39,7 +41,8 @@ final _uuid = Uuid();
     SyncQueue,
   ],
 )
-class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
+class RecordDao extends DatabaseAccessor<AppDatabase>
+    with _$RecordDaoMixin, DaoWriteHelpers {
   RecordDao(super.db);
 
   static const _log = AppLogger('RecordDao');
@@ -53,19 +56,28 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
 
   Future<List<FieldSession>> getRecentSessions({int limit = 50}) {
     _log.t('getRecentSessions(limit: $limit)');
-    return (select(db.fieldSessions)
+    return _recentSessions(limit).get();
+  }
+
+  /// Recent sessions, re-emitted whenever a session changes.
+  Stream<List<FieldSession>> watchRecentSessions({int limit = 50}) {
+    _log.t('watchRecentSessions(limit: $limit)');
+    return _recentSessions(limit).watch();
+  }
+
+  SimpleSelectStatement<$FieldSessionsTable, FieldSession> _recentSessions(
+    int limit,
+  ) => (select(db.fieldSessions)
           ..orderBy([
             (v) => OrderingTerm.desc(v.date),
             (v) => OrderingTerm.desc(v.updatedAt),
           ])
-          ..limit(limit))
-        .get();
-  }
+          ..limit(limit));
 
   Future<List<FieldSession>> getRecentClosedSessions({int limit = 50}) {
     _log.t('getRecentClosedSessions(limit: $limit)');
     return (select(db.fieldSessions)
-          ..where((v) => v.sessionStatus.equals('CLOSED'))
+          ..where((v) => v.sessionStatus.equals(SessionStatus.closed))
           ..orderBy([
             (v) => OrderingTerm.desc(v.closedAt),
             (v) => OrderingTerm.desc(v.date),
@@ -77,7 +89,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
   Future<List<FieldSession>> getInProgressSessions({int limit = 50}) {
     _log.t('getInProgressSessions(limit: $limit)');
     return (select(db.fieldSessions)
-          ..where((v) => v.sessionStatus.equals('IN_PROGRESS'))
+          ..where((v) => v.sessionStatus.equals(SessionStatus.inProgress))
           ..orderBy([(v) => OrderingTerm.desc(v.updatedAt)])
           ..limit(limit))
         .get();
@@ -338,7 +350,8 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
     return (select(db.sorties)
           ..where(
             (v) =>
-                v.sessionId.equals(sessionId) & v.flightStatus.equals('CLOSED'),
+                v.sessionId.equals(sessionId) &
+                v.flightStatus.equals(FlightStatus.closed),
           )
           ..orderBy([(v) => OrderingTerm.asc(v.sequenceNo)]))
         .get();
@@ -472,17 +485,16 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
         .get();
   }
 
-  Future<List<AuditEvent>> getAuditTrailForSession(String sessionId) async {
+  /// Everything audited for a session and its sorties, oldest first: one
+  /// indexed query on audit_events.session_id.
+  Future<List<AuditEvent>> getAuditTrailForSession(String sessionId) {
     _log.t('getAuditTrailForSession(sessionId: $sessionId)');
-    final entityIds = await _collectSessionEntityIds(sessionId);
-
-    if (entityIds.isEmpty) {
-      return [];
-    }
-
     return (select(db.auditEvents)
-          ..where((v) => v.entityId.isIn(entityIds.toList()))
-          ..orderBy([(v) => OrderingTerm.asc(v.performedAt)]))
+          ..where((v) => v.sessionId.equals(sessionId))
+          ..orderBy([
+            (v) => OrderingTerm.asc(v.performedAt),
+            (v) => OrderingTerm.asc(v.id),
+          ]))
         .get();
   }
 
@@ -525,7 +537,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: normalizedEntityType,
           entityId: entityId,
           action: 'AMEND',
@@ -533,7 +545,7 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
           performedBy: createdBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'RECORD_AMENDMENT',
           entityId: amendmentId,
           operation: 'INSERT',
@@ -561,18 +573,21 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
         .get();
   }
 
+  /// Amendments to the session's post-flight notes.
   Future<List<RecordAmendment>> getAmendmentsForSession(
     String sessionId,
   ) async {
     _log.t('getAmendmentsForSession(sessionId: $sessionId)');
-    final entityIds = await _collectSessionEntityIds(sessionId);
-
-    if (entityIds.isEmpty) {
-      return [];
-    }
+    final noteIds = await customSelect(
+      'SELECT n.id FROM post_flight_notes n '
+      'JOIN sorties s ON s.flight_id = n.flight_id WHERE s.session_id = ?',
+      variables: [Variable.withString(sessionId)],
+      readsFrom: {db.postFlightNotes, db.sorties},
+    ).map((row) => row.read<String>('id')).get();
+    if (noteIds.isEmpty) return [];
 
     return (select(db.recordAmendments)
-          ..where((v) => v.entityId.isIn(entityIds.toList()))
+          ..where((v) => v.entityId.isIn(noteIds))
           ..orderBy([(v) => OrderingTerm.asc(v.createdAt)]))
         .get();
   }
@@ -664,131 +679,5 @@ class RecordDao extends DatabaseAccessor<AppDatabase> with _$RecordDaoMixin {
     }
 
     return value;
-  }
-
-  Future<Set<String>> _collectSessionEntityIds(String sessionId) async {
-    final entityIds = <String>{sessionId};
-
-    final sessionUsers = await (select(
-      db.sessionUsers,
-    )..where((v) => v.sessionId.equals(sessionId))).get();
-
-    for (final item in sessionUsers) {
-      entityIds.add(item.id);
-    }
-
-    final sessionVehicles = await (select(
-      db.sessionVehicles,
-    )..where((v) => v.sessionId.equals(sessionId))).get();
-
-    for (final item in sessionVehicles) {
-      entityIds.add(item.id);
-    }
-
-    final sessionBatteries = await (select(
-      db.sessionBatteries,
-    )..where((v) => v.sessionId.equals(sessionId))).get();
-
-    for (final item in sessionBatteries) {
-      entityIds.add(item.id);
-    }
-
-    final equipmentChecks = await (select(
-      db.sessionEquipmentChecks,
-    )..where((v) => v.sessionId.equals(sessionId))).get();
-
-    for (final item in equipmentChecks) {
-      entityIds.add(item.id);
-    }
-
-    final sorties = await getSortiesForSession(sessionId);
-
-    for (final sortie in sorties) {
-      entityIds.add(sortie.flightId);
-
-      final sortieUsers = await (select(
-        db.sortieUsers,
-      )..where((v) => v.flightId.equals(sortie.flightId))).get();
-
-      for (final item in sortieUsers) {
-        entityIds.add(item.id);
-      }
-
-      final sortiePayloads = await (select(
-        db.sortiePayloads,
-      )..where((v) => v.flightId.equals(sortie.flightId))).get();
-
-      for (final item in sortiePayloads) {
-        entityIds.add(item.id);
-      }
-
-      final sortieBatteries = await (select(
-        db.sortieBatteries,
-      )..where((v) => v.flightId.equals(sortie.flightId))).get();
-
-      for (final item in sortieBatteries) {
-        entityIds.add(item.id);
-        entityIds.add('${item.flightId}:${item.batteryId}');
-      }
-
-      final checklistResponses = await (select(
-        db.checklistResponses,
-      )..where((v) => v.flightId.equals(sortie.flightId))).get();
-
-      for (final item in checklistResponses) {
-        entityIds.add(item.id);
-        entityIds.add('${item.flightId}:${item.itemId}');
-      }
-
-      final overrides = await (select(
-        db.checklistOverrides,
-      )..where((v) => v.flightId.equals(sortie.flightId))).get();
-
-      for (final item in overrides) {
-        entityIds.add(item.id);
-      }
-
-      final postFlightNote = await getPostFlightNoteForFlight(sortie.flightId);
-
-      if (postFlightNote != null) {
-        entityIds.add(postFlightNote.id);
-        entityIds.add(postFlightNote.flightId);
-      }
-    }
-
-    return entityIds;
-  }
-
-  Future<void> _insertAuditEvent({
-    required String entityType,
-    required String entityId,
-    required String action,
-    String? description,
-    required String performedBy,
-  }) {
-    return into(db.auditEvents).insert(
-      AuditEventsCompanion.insert(
-        entityType: entityType,
-        entityId: entityId,
-        action: action,
-        description: Value(description),
-        performedBy: performedBy,
-      ),
-    );
-  }
-
-  Future<void> _enqueueSync({
-    required String entityType,
-    required String entityId,
-    required String operation,
-  }) {
-    return into(db.syncQueue).insert(
-      SyncQueueCompanion.insert(
-        entityType: entityType,
-        entityId: entityId,
-        operation: operation,
-        syncStatus: const Value('PENDING'),
-      ),
-    );
   }
 }

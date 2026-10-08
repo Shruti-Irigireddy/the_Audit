@@ -71,6 +71,12 @@ class PreFlightRepositoryImpl implements PreFlightRepository {
   }
 
   @override
+  Stream<List<SortieEntity>> watchSortiesForSession(String sessionId) =>
+      _preFlightDao
+          .watchSortiesForSession(sessionId)
+          .map((sorties) => [for (final s in sorties) s.toEntity()]);
+
+  @override
   Future<PreFlightSetupEntity> getPreFlightSetup(String flightId) async {
     _log.t('getPreFlightSetup(flightId: $flightId)');
     final preFlightSetup = await _preFlightDao.getPreflightSetup(flightId);
@@ -519,7 +525,6 @@ class PreFlightRepositoryImpl implements PreFlightRepository {
   @override
   Future<void> markFlightInProgress({
     required String flightId,
-    String flightStatus = 'IN_PROGRESS',
     DateTime? takeoffAt,
     required String performedBy,
   }) {
@@ -534,7 +539,6 @@ class PreFlightRepositoryImpl implements PreFlightRepository {
   @override
   Future<void> recordLanding({
     required String flightId,
-    String flightStatus = 'LANDED',
     DateTime? landingAt,
     required String performedBy,
   }) {

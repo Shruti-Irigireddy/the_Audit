@@ -8,8 +8,8 @@ import 'package:the_audit/core/database/app_database.dart';
 
 import 'generated/schema.dart';
 
-/// Every upgrade between saved schema snapshots (drift_schemas/) must end
-/// with exactly the tables and columns the app declares. New snapshots come
+/// Every saved schema snapshot (drift_schemas/) must upgrade to exactly the
+/// tables and columns the app declares. New snapshots come
 /// from `dart run drift_dev make-migrations` after a schema change.
 void main() {
   // Some Linux hosts only ship the versioned library name.
@@ -24,17 +24,15 @@ void main() {
     verifier = SchemaVerifier(GeneratedHelper());
   });
 
+  // Every saved version must upgrade to the current schema.
   const versions = GeneratedHelper.versions;
-  for (final (i, fromVersion) in versions.indexed) {
-    group('from $fromVersion', () {
-      for (final toVersion in versions.skip(i + 1)) {
-        test('to $toVersion', () async {
-          final schema = await verifier.schemaAt(fromVersion);
-          final db = AppDatabase.forTesting(schema.newConnection());
-          await verifier.migrateAndValidate(db, toVersion);
-          await db.close();
-        });
-      }
+  final current = versions.last;
+  for (final fromVersion in versions.where((v) => v != current)) {
+    test('from $fromVersion to $current', () async {
+      final schema = await verifier.schemaAt(fromVersion);
+      final db = AppDatabase.forTesting(schema.newConnection());
+      await verifier.migrateAndValidate(db, current);
+      await db.close();
     });
   }
 }

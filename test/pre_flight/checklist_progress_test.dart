@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:the_audit/core/database/checklists/common_preflight.dart';
+import 'package:the_audit/core/database/seed/checklists.dart';
 import 'package:the_audit/features/pre_flight/domain/entities/checklist_response_entity.dart';
 import 'package:the_audit/features/pre_flight/presentation/pre-flight.dart';
 import 'package:the_audit/features/vehicle/domain/entities/checklist_item_entity.dart';

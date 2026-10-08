@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import 'package:the_audit/core/config/app_config.dart';
+import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/features/auth/data/current_user_repository.dart';
 import 'package:the_audit/core/database/app_database.dart';
@@ -35,9 +37,9 @@ enum PreFieldMissionType {
 }
 
 enum PreFieldSessionStatus {
-  planned('planned', 'PLANNED'),
+  planned('planned', SessionStatus.planned),
   inProgress('inprogress', 'IN_PROGRESS'),
-  closed('closed', 'CLOSED');
+  closed('closed', SessionStatus.closed);
 
   final String label;
   final String dbValue;
@@ -1413,7 +1415,7 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
 
         const locationSettings = LocationSettings(
           accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 15),
+          timeLimit: AppConfig.gpsFixTimeLimit,
         );
 
         try {

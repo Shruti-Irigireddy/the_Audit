@@ -5,6 +5,9 @@ abstract class RecordRepository {
 
   Future<List<FieldSessionEntity>> getRecentSessions({int limit = 50});
 
+  /// Recent sessions, updated live.
+  Stream<List<FieldSessionEntity>> watchRecentSessions({int limit = 50});
+
   Future<List<FieldSessionEntity>> getRecentClosedSessions({int limit = 50});
 
   Future<List<FieldSessionEntity>> getInProgressSessions({int limit = 50});

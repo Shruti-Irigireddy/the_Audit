@@ -4,13 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import 'package:the_audit/core/config/app_config.dart';
+import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/features/auth/data/user_repository.dart';
 import 'package:the_audit/features/auth/data/current_user_repository.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/navbar.dart';
 import 'package:the_audit/core/utils/step_indicator.dart';
-import 'package:the_audit/core/database/checklists/common_preflight.dart';
+import 'package:the_audit/core/database/seed/checklists.dart';
 import 'package:the_audit/core/utils/theme.dart';
 import 'package:the_audit/features/vehicle/domain/entities/checklist_item_entity.dart';
 import 'package:the_audit/features/auth/presentation/cubit/auth_cubit.dart';
@@ -290,7 +292,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
 
   late final PreFlightCubit _cubit;
   final _decisionReasonController = TextEditingController();
-  String _finalDecision = 'GO';
+  String _finalDecision = FinalDecision.go;
   String? _decisionByUserId;
 
   /// Every user's name by id, for showing the PIC.
@@ -332,7 +334,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
           ).showSnackBar(SnackBar(content: Text(state.errorMessage!)));
         },
         builder: (context, state) {
-          final goSaved = state.selectedSortie?.finalDecision == 'GO';
+          final goSaved = state.selectedSortie?.finalDecision == FinalDecision.go;
           // Every item's answer and arming state, looked up once.
           final progress = ChecklistProgress(
             state.checklistResponses,
@@ -488,7 +490,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
       ).showSnackBar(const SnackBar(content: Text('Tap READY TO ARM first.')));
       return;
     }
-    final isNoGo = _finalDecision == 'NO_GO';
+    final isNoGo = _finalDecision == FinalDecision.noGo;
     final reason = _nullable(_decisionReasonController.text);
     if (isNoGo && reason == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -514,7 +516,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
     // Back to the session: No-Go aborts the sortie, Go makes it Ready for
     // post-flight (both saved by the database).
     final status = _cubit.state.selectedSortie?.flightStatus;
-    if (status == 'ABORTED' || status == 'READY') {
+    if (status == FlightStatus.aborted || status == FlightStatus.ready) {
       _log.i('decision saved ($status); back to session');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -565,10 +567,10 @@ class _DecisionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isNoGo = finalDecision == 'NO_GO';
+    final isNoGo = finalDecision == FinalDecision.noGo;
     final sortie = state.selectedSortie;
     // Once a Go is saved the decision is shown, not edited.
-    final locked = sortie?.finalDecision == 'GO';
+    final locked = sortie?.finalDecision == FinalDecision.go;
     // The decision is made by the sortie's PIC (the sortie's own PIC first,
     // then any other crew listed as PIC).
     final crewNames = {
@@ -612,7 +614,7 @@ class _DecisionCard extends StatelessWidget {
                   label: Text('No-Go'),
                 ),
               ],
-              selected: {locked ? 'GO' : finalDecision},
+              selected: {locked ? FinalDecision.go : finalDecision},
               showSelectedIcon: false,
               onSelectionChanged: locked
                   ? null
@@ -872,7 +874,7 @@ class _ChecklistItemTileState extends State<_ChecklistItemTile> {
 
   /// Saves a typed value once typing pauses, so it saves without leaving the
   /// field.
-  static const _saveDelay = Duration(milliseconds: 500);
+  static const _saveDelay = AppConfig.valueSaveDelay;
   Timer? _saveTimer;
 
   @override

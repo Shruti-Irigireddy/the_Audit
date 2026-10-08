@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import 'package:the_audit/core/database/dao_write_helpers.dart';
 import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
@@ -20,7 +21,8 @@ part 'export_dao.g.dart';
     SyncQueue,
   ],
 )
-class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
+class ExportDao extends DatabaseAccessor<AppDatabase>
+    with _$ExportDaoMixin, DaoWriteHelpers {
   ExportDao(super.db);
 
   static const _log = AppLogger('ExportDao');
@@ -56,7 +58,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: normalizedEntityType,
           entityId: entityId,
           action: 'EXPORT_REQUESTED',
@@ -64,7 +66,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
           performedBy: generatedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'EXPORT_RECORD',
           entityId: exportId.toString(),
           operation: 'INSERT',
@@ -99,7 +101,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: record.entityType,
           entityId: record.entityId,
           action: 'EXPORT_IN_PROGRESS',
@@ -107,7 +109,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'EXPORT_RECORD',
           entityId: exportId.toString(),
           operation: 'UPDATE',
@@ -142,7 +144,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: record.entityType,
           entityId: record.entityId,
           action: 'EXPORTED',
@@ -151,7 +153,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'EXPORT_RECORD',
           entityId: exportId.toString(),
           operation: 'UPDATE',
@@ -186,7 +188,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: record.entityType,
           entityId: record.entityId,
           action: 'EXPORT_FAILED',
@@ -194,7 +196,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'EXPORT_RECORD',
           entityId: exportId.toString(),
           operation: 'UPDATE',
@@ -227,7 +229,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: record.entityType,
           entityId: record.entityId,
           action: 'EXPORT_RETRY',
@@ -235,7 +237,7 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'EXPORT_RECORD',
           entityId: exportId.toString(),
           operation: 'UPDATE',
@@ -430,38 +432,5 @@ class ExportDao extends DatabaseAccessor<AppDatabase> with _$ExportDaoMixin {
       _log.w('Cannot export missing entity: $entityType $entityId');
       throw AppFailure('Cannot export missing entity: $entityType $entityId');
     }
-  }
-
-  Future<void> _insertAuditEvent({
-    required String entityType,
-    required String entityId,
-    required String action,
-    String? description,
-    required String performedBy,
-  }) {
-    return into(db.auditEvents).insert(
-      AuditEventsCompanion.insert(
-        entityType: entityType,
-        entityId: entityId,
-        action: action,
-        description: Value(description),
-        performedBy: performedBy,
-      ),
-    );
-  }
-
-  Future<void> _enqueueSync({
-    required String entityType,
-    required String entityId,
-    required String operation,
-  }) {
-    return into(db.syncQueue).insert(
-      SyncQueueCompanion.insert(
-        entityType: entityType,
-        entityId: entityId,
-        operation: operation,
-        syncStatus: const Value('PENDING'),
-      ),
-    );
   }
 }

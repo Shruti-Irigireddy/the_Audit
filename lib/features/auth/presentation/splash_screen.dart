@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:the_audit/core/config/app_config.dart';
 import 'package:the_audit/core/utils/theme.dart';
 
 /// Gradient splash shown at start-up. Matches the native launch screens, then
 /// slowly zooms the logo in 10% before the app moves on to login / home.
 class SplashScreen extends StatelessWidget {
   /// How long the zoom runs; AuthGate keeps the splash up for this long.
-  static const zoomDuration = Duration(milliseconds: 2500);
+  static const zoomDuration = AppConfig.splashDuration;
 
   const SplashScreen({super.key});
 

@@ -1,6 +1,8 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:the_audit/core/database/database_constants.dart';
+import 'package:the_audit/core/database/dao_write_helpers.dart';
 import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/database/dtos/shared_dtos.dart';
@@ -27,7 +29,7 @@ final _uuid = Uuid();
   ],
 )
 class PostFlightDao extends DatabaseAccessor<AppDatabase>
-    with _$PostFlightDaoMixin {
+    with _$PostFlightDaoMixin, DaoWriteHelpers {
   PostFlightDao(super.db);
 
   static const _log = AppLogger('PostFlightDao');
@@ -172,164 +174,168 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
     _log.t(
       'savePostFlightNote(id: $id, flightId: $flightId, objectiveResult: $objectiveResult, missionRating: $missionRating, logStoredAt: $logStoredAt, followUpStatus: $followUpStatus)',
     );
-    return _log.trace('savePostFlightNote', () async {
-      final sortie = await _requireSortie(flightId);
-      // A closed sortie can still be edited; each edit is also logged as an
-      // amendment (who, when, what changed).
-      final editingClosed = _isStatus(sortie, _statusClosed);
-      if (!editingClosed) await _ensurePostFlightEditable(flightId);
+    return _log.trace(
+      'savePostFlightNote',
+      () => transaction(() async {
+        final sortie = await _requireSortie(flightId);
+        // A closed sortie can still be edited; each edit is also logged as an
+        // amendment (who, when, what changed).
+        final editingClosed = _isStatus(sortie, _statusClosed);
+        if (!editingClosed) await _ensurePostFlightEditable(flightId);
 
-      final existingNote = await getPostFlightNoteForFlight(flightId);
+        final existingNote = await getPostFlightNoteForFlight(flightId);
 
-      final noteId = existingNote?.id ?? id ?? _uuid.v4();
+        final noteId = existingNote?.id ?? id ?? _uuid.v4();
 
-      final normalizedObjectiveResult = _upper(objectiveResult);
-      final normalizedMissionRating = _nullableUpper(missionRating);
-      final normalizedLogStoredAt = _nullableUpper(logStoredAt);
-      final resolvedFollowUpRequired =
-          followUpRequired ||
-          _requiresFollowUp(
-            objectiveResult: normalizedObjectiveResult,
-            issuesEncountered: issuesEncountered,
-          );
-      final normalizedFollowUpStatus =
-          _nullableUpper(followUpStatus) ?? _followUpPending;
-
-      _validatePostFlightInputs(
-        objectiveResult: normalizedObjectiveResult,
-        missionRating: normalizedMissionRating,
-        logStoredAt: normalizedLogStoredAt,
-        followUpStatus: normalizedFollowUpStatus,
-        followUpRequired: resolvedFollowUpRequired,
-        followUpNotes: followUpNotes,
-        followUpAssignedTo: followUpAssignedTo,
-        followUpDueDate: followUpDueDate,
-      );
-      _validateLandedState(
-        flightDurationSeconds: flightDurationSeconds,
-        landedBatteryVoltage: landedBatteryVoltage,
-        landedBatteryPercent: landedBatteryPercent,
-      );
-
-      final durationSeconds = flightDurationSeconds ?? _calculateFlightDurationSeconds(sortie);
-      final now = DateTime.now();
-
-      await transaction(() async {
-        if (existingNote == null) {
-          await into(db.postFlightNotes).insert(
-            PostFlightNotesCompanion.insert(
-              id: noteId,
-              flightId: flightId,
+        final normalizedObjectiveResult = _upper(objectiveResult);
+        final normalizedMissionRating = _nullableUpper(missionRating);
+        final normalizedLogStoredAt = _nullableUpper(logStoredAt);
+        final resolvedFollowUpRequired =
+            followUpRequired ||
+            _requiresFollowUp(
               objectiveResult: normalizedObjectiveResult,
-              objectiveNotes: Value(objectiveNotes),
-              missionRating: Value(normalizedMissionRating),
-              issuesEncountered: Value(issuesEncountered),
-              logStoredAt: Value(normalizedLogStoredAt),
-              logLocation: Value(logLocation),
-              logNotes: Value(logNotes),
-              flightDurationSeconds: Value(durationSeconds),
-              landedBatteryVoltage: Value(landedBatteryVoltage),
-              landedBatteryPercent: Value(landedBatteryPercent),
-              followUpRequired: Value(resolvedFollowUpRequired),
-              followUpNotes: Value(followUpNotes),
-              followUpAssignedTo: Value(followUpAssignedTo),
-              followUpDueDate: Value(followUpDueDate),
-              followUpStatus: Value(normalizedFollowUpStatus),
-              notes: Value(notes),
-              createdBy: createdBy,
-            ),
-          );
-        } else {
-          await (update(
-            db.postFlightNotes,
-          )..where((v) => v.flightId.equals(flightId))).write(
-            PostFlightNotesCompanion(
-              objectiveResult: Value(normalizedObjectiveResult),
-              objectiveNotes: Value(objectiveNotes),
-              missionRating: Value(normalizedMissionRating),
-              issuesEncountered: Value(issuesEncountered),
-              logStoredAt: Value(normalizedLogStoredAt),
-              logLocation: Value(logLocation),
-              logNotes: Value(logNotes),
-              flightDurationSeconds: Value(durationSeconds),
-              landedBatteryVoltage: Value(landedBatteryVoltage),
-              landedBatteryPercent: Value(landedBatteryPercent),
-              followUpRequired: Value(resolvedFollowUpRequired),
-              followUpNotes: Value(followUpNotes),
-              followUpAssignedTo: Value(followUpAssignedTo),
-              followUpDueDate: Value(followUpDueDate),
-              followUpStatus: Value(normalizedFollowUpStatus),
-              notes: Value(notes),
-              updatedAt: Value(now),
-            ),
-          );
-        }
+              issuesEncountered: issuesEncountered,
+            );
+        final normalizedFollowUpStatus =
+            _nullableUpper(followUpStatus) ?? _followUpPending;
 
-        await _touchSortie(flightId, now: now);
-        await _touchSession(sortie.sessionId, now: now);
-
-        await _insertAuditEvent(
-          entityType: 'POST_FLIGHT_NOTE',
-          entityId: noteId,
-          action: existingNote == null ? 'CREATE' : 'UPDATE',
-          description: 'Post-flight note saved',
-          performedBy: createdBy,
+        _validatePostFlightInputs(
+          objectiveResult: normalizedObjectiveResult,
+          missionRating: normalizedMissionRating,
+          logStoredAt: normalizedLogStoredAt,
+          followUpStatus: normalizedFollowUpStatus,
+          followUpRequired: resolvedFollowUpRequired,
+          followUpNotes: followUpNotes,
+          followUpAssignedTo: followUpAssignedTo,
+          followUpDueDate: followUpDueDate,
+        );
+        _validateLandedState(
+          flightDurationSeconds: flightDurationSeconds,
+          landedBatteryVoltage: landedBatteryVoltage,
+          landedBatteryPercent: landedBatteryPercent,
         );
 
-        if (editingClosed && existingNote != null) {
-          final changed = _changedFields(existingNote, {
-            'objective result': normalizedObjectiveResult,
-            'objective notes': objectiveNotes,
-            'mission rating': normalizedMissionRating,
-            'issues': issuesEncountered,
-            'log storage': normalizedLogStoredAt,
-            'log location': logLocation,
-            'log notes': logNotes,
-            'flight duration': durationSeconds,
-            'landed battery voltage': landedBatteryVoltage,
-            'landed battery %': landedBatteryPercent,
-            'follow-up required': resolvedFollowUpRequired,
-            'follow-up notes': followUpNotes,
-            'follow-up assigned to': followUpAssignedTo,
-            'follow-up status': normalizedFollowUpStatus,
-            'notes': notes,
-          });
-          if (changed.isNotEmpty) {
-            final amendmentId = _uuid.v4();
-            final text = 'Edited after close: ${changed.join(', ')}';
-            await into(db.recordAmendments).insert(
-              RecordAmendmentsCompanion.insert(
-                id: amendmentId,
-                entityType: 'POST_FLIGHT_NOTE',
-                entityId: noteId,
-                amendmentText: text,
+        final durationSeconds =
+            flightDurationSeconds ?? _calculateFlightDurationSeconds(sortie);
+        final now = DateTime.now();
+
+        await transaction(() async {
+          if (existingNote == null) {
+            await into(db.postFlightNotes).insert(
+              PostFlightNotesCompanion.insert(
+                id: noteId,
+                flightId: flightId,
+                objectiveResult: normalizedObjectiveResult,
+                objectiveNotes: Value(objectiveNotes),
+                missionRating: Value(normalizedMissionRating),
+                issuesEncountered: Value(issuesEncountered),
+                logStoredAt: Value(normalizedLogStoredAt),
+                logLocation: Value(logLocation),
+                logNotes: Value(logNotes),
+                flightDurationSeconds: Value(durationSeconds),
+                landedBatteryVoltage: Value(landedBatteryVoltage),
+                landedBatteryPercent: Value(landedBatteryPercent),
+                followUpRequired: Value(resolvedFollowUpRequired),
+                followUpNotes: Value(followUpNotes),
+                followUpAssignedTo: Value(followUpAssignedTo),
+                followUpDueDate: Value(followUpDueDate),
+                followUpStatus: Value(normalizedFollowUpStatus),
+                notes: Value(notes),
                 createdBy: createdBy,
               ),
             );
-            await _insertAuditEvent(
-              entityType: 'POST_FLIGHT_NOTE',
-              entityId: noteId,
-              action: 'AMEND',
-              description: text,
-              performedBy: createdBy,
-            );
-            await _enqueueSync(
-              entityType: 'RECORD_AMENDMENT',
-              entityId: amendmentId,
-              operation: 'INSERT',
+          } else {
+            await (update(
+              db.postFlightNotes,
+            )..where((v) => v.flightId.equals(flightId))).write(
+              PostFlightNotesCompanion(
+                objectiveResult: Value(normalizedObjectiveResult),
+                objectiveNotes: Value(objectiveNotes),
+                missionRating: Value(normalizedMissionRating),
+                issuesEncountered: Value(issuesEncountered),
+                logStoredAt: Value(normalizedLogStoredAt),
+                logLocation: Value(logLocation),
+                logNotes: Value(logNotes),
+                flightDurationSeconds: Value(durationSeconds),
+                landedBatteryVoltage: Value(landedBatteryVoltage),
+                landedBatteryPercent: Value(landedBatteryPercent),
+                followUpRequired: Value(resolvedFollowUpRequired),
+                followUpNotes: Value(followUpNotes),
+                followUpAssignedTo: Value(followUpAssignedTo),
+                followUpDueDate: Value(followUpDueDate),
+                followUpStatus: Value(normalizedFollowUpStatus),
+                notes: Value(notes),
+                updatedAt: Value(now),
+              ),
             );
           }
-        }
 
-        await _enqueueSync(
-          entityType: 'POST_FLIGHT_NOTE',
-          entityId: noteId,
-          operation: existingNote == null ? 'INSERT' : 'UPDATE',
-        );
-      });
+          await _touchSortie(flightId, now: now);
+          await _touchSession(sortie.sessionId, now: now);
 
-      return noteId;
-    });
+          await insertAuditEvent(
+            entityType: 'POST_FLIGHT_NOTE',
+            entityId: noteId,
+            action: existingNote == null ? 'CREATE' : 'UPDATE',
+            description: 'Post-flight note saved',
+            performedBy: createdBy,
+          );
+
+          if (editingClosed && existingNote != null) {
+            final changed = _changedFields(existingNote, {
+              'objective result': normalizedObjectiveResult,
+              'objective notes': objectiveNotes,
+              'mission rating': normalizedMissionRating,
+              'issues': issuesEncountered,
+              'log storage': normalizedLogStoredAt,
+              'log location': logLocation,
+              'log notes': logNotes,
+              'flight duration': durationSeconds,
+              'landed battery voltage': landedBatteryVoltage,
+              'landed battery %': landedBatteryPercent,
+              'follow-up required': resolvedFollowUpRequired,
+              'follow-up notes': followUpNotes,
+              'follow-up assigned to': followUpAssignedTo,
+              'follow-up status': normalizedFollowUpStatus,
+              'notes': notes,
+            });
+            if (changed.isNotEmpty) {
+              final amendmentId = _uuid.v4();
+              final text = 'Edited after close: ${changed.join(', ')}';
+              await into(db.recordAmendments).insert(
+                RecordAmendmentsCompanion.insert(
+                  id: amendmentId,
+                  entityType: 'POST_FLIGHT_NOTE',
+                  entityId: noteId,
+                  amendmentText: text,
+                  createdBy: createdBy,
+                ),
+              );
+              await insertAuditEvent(
+                entityType: 'POST_FLIGHT_NOTE',
+                entityId: noteId,
+                action: 'AMEND',
+                description: text,
+                performedBy: createdBy,
+              );
+              await enqueueSync(
+                entityType: 'RECORD_AMENDMENT',
+                entityId: amendmentId,
+                operation: 'INSERT',
+              );
+            }
+          }
+
+          await enqueueSync(
+            entityType: 'POST_FLIGHT_NOTE',
+            entityId: noteId,
+            operation: existingNote == null ? 'INSERT' : 'UPDATE',
+          );
+        });
+
+        return noteId;
+      }),
+    );
   }
 
   Future<void> updateObjectiveResult({
@@ -373,7 +379,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
         await _touchSortie(flightId, now: now);
         await _touchSession(sortie.sessionId, now: now);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'POST_FLIGHT_NOTE',
           entityId: note.id,
           action: 'UPDATE_OBJECTIVE_RESULT',
@@ -381,7 +387,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'POST_FLIGHT_NOTE',
           entityId: note.id,
           operation: 'UPDATE',
@@ -426,7 +432,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
         await _touchSortie(flightId, now: now);
         await _touchSession(sortie.sessionId, now: now);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'POST_FLIGHT_NOTE',
           entityId: note.id,
           action: 'UPDATE_MISSION_RATING',
@@ -434,7 +440,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'POST_FLIGHT_NOTE',
           entityId: note.id,
           operation: 'UPDATE',
@@ -481,7 +487,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
         await _touchSortie(flightId, now: now);
         await _touchSession(sortie.sessionId, now: now);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'POST_FLIGHT_NOTE',
           entityId: note.id,
           action: 'UPDATE_LOG_DETAILS',
@@ -489,7 +495,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'POST_FLIGHT_NOTE',
           entityId: note.id,
           operation: 'UPDATE',
@@ -530,7 +536,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
         await _touchSortie(flightId, now: now);
         await _touchSession(sortie.sessionId, now: now);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'POST_FLIGHT_NOTE',
           entityId: note.id,
           action: 'UPDATE_ISSUES',
@@ -538,7 +544,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'POST_FLIGHT_NOTE',
           entityId: note.id,
           operation: 'UPDATE',
@@ -592,7 +598,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
         await _touchSortie(flightId, now: now);
         await _touchSession(sortie.sessionId, now: now);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'POST_FLIGHT_NOTE',
           entityId: note.id,
           action: 'UPDATE_FOLLOW_UP_STATUS',
@@ -600,7 +606,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'POST_FLIGHT_NOTE',
           entityId: note.id,
           operation: 'UPDATE',
@@ -633,7 +639,9 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
 
       if (sortieBattery == null) {
         _log.w('Battery $batteryId was not selected for this sortie.');
-        throw AppFailure('Battery $batteryId was not selected for this sortie.');
+        throw AppFailure(
+          'Battery $batteryId was not selected for this sortie.',
+        );
       }
 
       final now = DateTime.now();
@@ -652,7 +660,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
         await _touchSortie(flightId, now: now);
         await _touchSession(sortie.sessionId, now: now);
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'SORTIE_BATTERY',
           entityId: sortieBattery.id,
           action: 'UPDATE_END_STATE',
@@ -660,7 +668,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: performedBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'SORTIE_BATTERY',
           entityId: sortieBattery.id,
           operation: 'UPDATE',
@@ -697,7 +705,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
           ),
         );
 
-        await _insertAuditEvent(
+        await insertAuditEvent(
           entityType: 'POST_FLIGHT_NOTE',
           entityId: note.id,
           action: 'AMEND',
@@ -705,7 +713,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
           performedBy: createdBy,
         );
 
-        await _enqueueSync(
+        await enqueueSync(
           entityType: 'RECORD_AMENDMENT',
           entityId: amendmentId,
           operation: 'INSERT',
@@ -769,7 +777,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
             ),
           );
 
-          await _insertAuditEvent(
+          await insertAuditEvent(
             entityType: 'SORTIE_BATTERY',
             entityId: existingBattery.id,
             action: 'UPDATE_END_STATE',
@@ -777,7 +785,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
             performedBy: performedBy,
           );
 
-          await _enqueueSync(
+          await enqueueSync(
             entityType: 'SORTIE_BATTERY',
             entityId: existingBattery.id,
             operation: 'UPDATE',
@@ -936,75 +944,86 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
     required String closedBy,
   }) async {
     _log.t('closeSortie(flightId: $flightId)');
-    return _log.trace('closeSortie', () async {
-      final check = await _buildPostFlightClosureCheck(flightId);
+    return _log.trace(
+      'closeSortie',
+      () => transaction(() async {
+        final check = await _buildPostFlightClosureCheck(flightId);
 
-      if (check.issues.isNotEmpty) {
-        _log.w(check.issues.join('\n'));
-        throw AppFailure(check.issues.join('\n'));
-      }
+        if (check.issues.isNotEmpty) {
+          _log.w(check.issues.join('\n'));
+          throw AppFailure(check.issues.join('\n'));
+        }
 
-      final sortie = check.sortie;
-      final postFlightNote = check.postFlightNote;
-      final durationSeconds =
-          _calculateFlightDurationSeconds(sortie) ??
-          postFlightNote?.flightDurationSeconds;
-      final now = DateTime.now();
+        final sortie = check.sortie;
+        final postFlightNote = check.postFlightNote;
+        final durationSeconds =
+            _calculateFlightDurationSeconds(sortie) ??
+            postFlightNote?.flightDurationSeconds;
+        final now = DateTime.now();
 
-      await transaction(() async {
-        await (update(
-          db.sorties,
-        )..where((v) => v.flightId.equals(flightId))).write(
-          SortiesCompanion(
-            flightStatus: const Value(_statusClosed),
-            closedAt: Value(now),
-            closedBy: Value(closedBy),
-            updatedAt: Value(now),
-          ),
-        );
+        await transaction(() async {
+          // Never re-close a closed sortie.
+          final changed =
+              await (update(db.sorties)..where(
+                    (v) =>
+                        v.flightId.equals(flightId) &
+                        v.flightStatus.equals(_statusClosed).not(),
+                  ))
+                  .write(
+                    SortiesCompanion(
+                      flightStatus: const Value(_statusClosed),
+                      closedAt: Value(now),
+                      closedBy: Value(closedBy),
+                      updatedAt: Value(now),
+                    ),
+                  );
+          if (changed == 0) {
+            throw AppFailure('This sortie is already closed.');
+          }
 
-        if (postFlightNote != null) {
-          await (update(
-            db.postFlightNotes,
-          )..where((v) => v.flightId.equals(flightId))).write(
-            PostFlightNotesCompanion(
-              flightDurationSeconds: Value(durationSeconds),
-              updatedAt: Value(now),
-            ),
+          if (postFlightNote != null) {
+            await (update(
+              db.postFlightNotes,
+            )..where((v) => v.flightId.equals(flightId))).write(
+              PostFlightNotesCompanion(
+                flightDurationSeconds: Value(durationSeconds),
+                updatedAt: Value(now),
+              ),
+            );
+
+            await enqueueSync(
+              entityType: 'POST_FLIGHT_NOTE',
+              entityId: postFlightNote.id,
+              operation: 'UPDATE',
+            );
+          }
+
+          if (sortie.takeoffAt != null) {
+            await _incrementBatteryCyclesForFlight(
+              flightId,
+              performedBy: closedBy,
+              now: now,
+            );
+          }
+
+          await _touchSession(sortie.sessionId, now: now);
+
+          await insertAuditEvent(
+            entityType: 'SORTIE',
+            entityId: flightId,
+            action: 'CLOSE',
+            description: 'Sortie closed after post-flight completion',
+            performedBy: closedBy,
           );
 
-          await _enqueueSync(
-            entityType: 'POST_FLIGHT_NOTE',
-            entityId: postFlightNote.id,
+          await enqueueSync(
+            entityType: 'SORTIE',
+            entityId: flightId,
             operation: 'UPDATE',
           );
-        }
-
-        if (sortie.takeoffAt != null) {
-          await _incrementBatteryCyclesForFlight(
-            flightId,
-            performedBy: closedBy,
-            now: now,
-          );
-        }
-
-        await _touchSession(sortie.sessionId, now: now);
-
-        await _insertAuditEvent(
-          entityType: 'SORTIE',
-          entityId: flightId,
-          action: 'CLOSE',
-          description: 'Sortie closed after post-flight completion',
-          performedBy: closedBy,
-        );
-
-        await _enqueueSync(
-          entityType: 'SORTIE',
-          entityId: flightId,
-          operation: 'UPDATE',
-        );
-      });
-    });
+        });
+      }),
+    );
   }
 
   Future<Sorty> _requireSortie(String flightId) async {
@@ -1114,7 +1133,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
     );
 
     for (final batteryId in batteryIds) {
-      await _insertAuditEvent(
+      await insertAuditEvent(
         entityType: 'BATTERY',
         entityId: batteryId,
         action: 'CYCLE_INCREMENT',
@@ -1122,7 +1141,7 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
         performedBy: performedBy,
       );
 
-      await _enqueueSync(
+      await enqueueSync(
         entityType: 'BATTERY',
         entityId: batteryId,
         operation: 'UPDATE',
@@ -1284,39 +1303,6 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
         .write(FieldSessionsCompanion(updatedAt: Value(now)));
   }
 
-  Future<void> _insertAuditEvent({
-    required String entityType,
-    required String entityId,
-    required String action,
-    String? description,
-    required String performedBy,
-  }) {
-    return into(db.auditEvents).insert(
-      AuditEventsCompanion.insert(
-        entityType: entityType,
-        entityId: entityId,
-        action: action,
-        description: Value(description),
-        performedBy: performedBy,
-      ),
-    );
-  }
-
-  Future<void> _enqueueSync({
-    required String entityType,
-    required String entityId,
-    required String operation,
-  }) {
-    return into(db.syncQueue).insert(
-      SyncQueueCompanion.insert(
-        entityType: entityType,
-        entityId: entityId,
-        operation: operation,
-        syncStatus: const Value('PENDING'),
-      ),
-    );
-  }
-
   bool _isStatus(Sorty sortie, String status) {
     return _normalizeStatus(sortie.flightStatus) == status;
   }
@@ -1343,12 +1329,12 @@ class PostFlightDao extends DatabaseAccessor<AppDatabase>
     return trimmed.toUpperCase();
   }
 
-  static const String _statusPreflight = 'PREFLIGHT';
-  static const String _statusInProgress = 'IN_PROGRESS';
-  static const String _statusReady = 'READY';
-  static const String _statusFlown = 'FLOWN';
-  static const String _statusAborted = 'ABORTED';
-  static const String _statusClosed = 'CLOSED';
+  static const String _statusPreflight = FlightStatus.preflight;
+  static const String _statusInProgress = FlightStatus.inProgress;
+  static const String _statusReady = FlightStatus.ready;
+  static const String _statusFlown = FlightStatus.flown;
+  static const String _statusAborted = FlightStatus.aborted;
+  static const String _statusClosed = FlightStatus.closed;
 
   static const String _followUpPending = 'PENDING';
 

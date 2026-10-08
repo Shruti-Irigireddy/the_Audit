@@ -28,6 +28,12 @@ class RecordRepositoryImpl implements RecordRepository {
   }
 
   @override
+  Stream<List<FieldSessionEntity>> watchRecentSessions({int limit = 50}) =>
+      _dao
+          .watchRecentSessions(limit: limit)
+          .map((sessions) => [for (final s in sessions) s.toEntity()]);
+
+  @override
   Future<List<FieldSessionEntity>> getRecentClosedSessions({
     int limit = 50,
   }) async {

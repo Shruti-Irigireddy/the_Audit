@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/features/auth/data/current_user_repository.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/navbar.dart';
@@ -63,7 +64,7 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
     )..loadSession(widget.sessionId);
     _preFlightCubit = PreFlightCubit(
       PreFlightRepositoryImpl(widget.database.preFlightDao),
-    )..loadSortiesForSession(widget.sessionId);
+    )..watchSortiesForSession(widget.sessionId);
   }
 
   @override
@@ -91,7 +92,7 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
               // A vehicle is busy while one of its sorties is still open:
               // PREFLIGHT, READY (Go saved, flying until its post-flight is
               // closed) or IN_PROGRESS. FLOWN, CLOSED and ABORTED free it.
-              const busyStatuses = {'PREFLIGHT', 'READY', 'IN_PROGRESS'};
+              const busyStatuses = {FlightStatus.preflight, FlightStatus.ready, FlightStatus.inProgress};
               final busyVehicleIds = {
                 for (final sortie in sorties)
                   if (busyStatuses.contains(sortie.flightStatus))
@@ -102,8 +103,8 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
               final openSorties = sorties
                   .where(
                     (s) =>
-                        s.flightStatus != 'CLOSED' &&
-                        s.flightStatus != 'ABORTED',
+                        s.flightStatus != FlightStatus.closed &&
+                        s.flightStatus != FlightStatus.aborted,
                   )
                   .length;
               return ListView(
@@ -156,9 +157,9 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
                               // Next step: pre-flight until Go is saved,
                               // then post-flight notes.
                               onTap: () => switch (sortie.flightStatus) {
-                                'READY' ||
-                                'FLOWN' ||
-                                'CLOSED' => _openPostFlight(sortie.flightId),
+                                FlightStatus.ready ||
+                                FlightStatus.flown ||
+                                FlightStatus.closed => _openPostFlight(sortie.flightId),
                                 _ => _openPreFlight(sortie.flightId),
                               },
                             ),
@@ -376,7 +377,6 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
       } else {
         _log.w('create sortie: no sortie selected after create');
       }
-      await _preFlightCubit.loadSortiesForSession(widget.sessionId);
     });
   }
 
@@ -418,7 +418,6 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
         ),
       ),
     );
-    await _preFlightCubit.loadSortiesForSession(widget.sessionId);
   }
 
   Future<void> _openPostFlight(String flightId) async {
@@ -433,7 +432,6 @@ class _SessionLoopPageState extends State<SessionLoopPage> {
         ),
       ),
     );
-    await _preFlightCubit.loadSortiesForSession(widget.sessionId);
   }
 
   Future<void> _closeSession() async {
@@ -793,12 +791,12 @@ class _SortieTile extends StatelessWidget {
 
   /// (tag, still running?) for a flight status.
   static (String, bool) _tag(String status) => switch (status) {
-    'PREFLIGHT' => ('Pre-flight', true),
-    'READY' => ('Ready', true),
+    FlightStatus.preflight => ('Pre-flight', true),
+    FlightStatus.ready => ('Ready', true),
     'IN_PROGRESS' => ('In flight', true),
-    'FLOWN' => ('Post-flight', true),
-    'CLOSED' => ('Ended', false),
-    'ABORTED' => ('Aborted', false),
+    FlightStatus.flown => ('Post-flight', true),
+    FlightStatus.closed => ('Ended', false),
+    FlightStatus.aborted => ('Aborted', false),
     _ => (status, false),
   };
 

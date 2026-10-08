@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/core/utils/theme.dart';
@@ -32,7 +33,7 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _log.t('initState');
     _records = RecordsCubit(RecordRepositoryImpl(widget.database.recordDao))
-      ..loadRecentSessions();
+      ..watchRecentSessions();
   }
 
   @override
@@ -58,7 +59,6 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     );
-    if (mounted) _reload();
   }
 
   Future<void> _openSession(FieldSessionEntity session) async {
@@ -75,7 +75,6 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     );
-    if (mounted) _reload();
   }
 
   @override
@@ -182,7 +181,7 @@ class _StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isOpen = status != 'CLOSED';
+    final isOpen = status != SessionStatus.closed;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: AppDecorations.stepChip(active: isOpen),

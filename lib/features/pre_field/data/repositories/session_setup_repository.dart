@@ -1,7 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 
 import 'package:the_audit/core/database/app_database.dart';
-import 'package:the_audit/core/database/checklists/common_preflight.dart';
+import 'package:the_audit/core/database/seed/checklists.dart';
 import 'package:the_audit/core/database/dtos/equipment_dtos.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 import 'package:the_audit/features/auth/data/user_directory.dart';
@@ -174,18 +174,18 @@ class SessionSetupRepository {
       for (final payload in await dao.getAllPayloads())
         if (payload.status == 'ACTIVE') payload,
     ];
-    final types = <String, Set<String>>{};
-    final limits = <String, Set<String>>{};
-    for (final payload in payloads) {
-      types[payload.payloadId] = {
-        for (final type in await dao.getCompatibleVehicleTypes(
-          payload.payloadId,
-        ))
-          type.trim().toUpperCase(),
-      };
-      final vehicleIds = await dao.getLimitedVehicleIds(payload.payloadId);
-      if (vehicleIds.isNotEmpty) limits[payload.payloadId] = {...vehicleIds};
-    }
+    // Three queries in all, however many payloads there are.
+    final allTypes = await dao.getAllCompatibleVehicleTypes();
+    final allLimits = await dao.getAllVehicleLimits();
+    final types = {
+      for (final payload in payloads)
+        payload.payloadId: allTypes[payload.payloadId] ?? <String>{},
+    };
+    final limits = {
+      for (final payload in payloads)
+        if (allLimits[payload.payloadId] case final vehicleIds?)
+          payload.payloadId: vehicleIds,
+    };
     _log.d(
       'loaded ${payloads.length} payloads (${limits.length} vehicle-limited)',
     );

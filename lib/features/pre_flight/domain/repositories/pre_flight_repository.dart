@@ -26,6 +26,9 @@ abstract class PreFlightRepository {
 
   Future<List<SortieEntity>> getSortiesForSession(String sessionId);
 
+  /// The session's sorties, updated live.
+  Stream<List<SortieEntity>> watchSortiesForSession(String sessionId);
+
   Future<PreFlightSetupEntity> getPreFlightSetup(String flightId);
 
   Future<void> updateSortieBasicInfo({
@@ -177,14 +180,12 @@ abstract class PreFlightRepository {
 
   Future<void> markFlightInProgress({
     required String flightId,
-    String flightStatus,
     DateTime? takeoffAt,
     required String performedBy,
   });
 
   Future<void> recordLanding({
     required String flightId,
-    String flightStatus,
     DateTime? landingAt,
     required String performedBy,
   });

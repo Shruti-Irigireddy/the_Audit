@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:drift/drift.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 
+import 'package:the_audit/core/config/app_config.dart';
 import 'package:the_audit/core/database/app_database.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
 
@@ -58,7 +59,7 @@ class UserDirectory {
       final snapshot = await _firestore
           .collection(collection)
           .get()
-          .timeout(const Duration(seconds: 10));
+          .timeout(AppConfig.userSyncTimeout);
 
       var saved = 0;
       // One transaction: far fewer disk writes than one per user.

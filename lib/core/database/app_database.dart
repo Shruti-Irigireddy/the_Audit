@@ -1,6 +1,10 @@
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
-import 'package:the_audit/core/database/checklists/common_preflight.dart';
+import 'package:the_audit/core/database/seed/checklists.dart';
+import 'package:the_audit/core/database/seed/default_equipment.dart';
+import 'package:the_audit/core/database/seed/default_fleet.dart';
+import 'package:the_audit/core/database/seed/default_payloads.dart';
+import 'package:the_audit/core/database/dao_write_helpers.dart';
 import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/core/database/sql_log_interceptor.dart';
 import 'package:the_audit/core/utils/app_logger.dart';
@@ -124,7 +128,8 @@ class FieldSessions extends Table {
   // Vehicle taken - list of vehicleIds (multi-enum)
   // Pre-flight checklist - embedded table with checklist items (multi-enum)
   // Flights - list of flightIds (multi-enum)
-  TextColumn get sessionStatus => text()(); // PLANNED, IN_PROGRESS, CLOSED
+  TextColumn get sessionStatus =>
+      text().check(sessionStatus.isIn(SessionStatus.all))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get closedAt => dateTime().nullable()();
@@ -394,12 +399,13 @@ class Sorties extends Table {
   DateTimeColumn get takeoffAt => dateTime().nullable()();
   DateTimeColumn get landingAt => dateTime().nullable()();
   // Post-flight notes - embedded table with checklist items (multi-enum)
-  TextColumn get flightStatus => text().withDefault(
-    const Constant('PREFLIGHT'),
-  )(); // PREFLIGHT, IN_PROGRESS, CLOSED, ABORTED
+  TextColumn get flightStatus => text()
+      .withDefault(const Constant(FlightStatus.preflight))
+      .check(flightStatus.isIn(FlightStatus.all))();
   DateTimeColumn get closedAt => dateTime().nullable()();
   TextColumn get closedBy => text().references(Users, #id).nullable()();
-  TextColumn get finalDecision => text().nullable()(); // GO, NO_GO
+  TextColumn get finalDecision =>
+      text().nullable().check(finalDecision.isIn(FinalDecision.all))();
   TextColumn get decisionReason => text().nullable()();
   TextColumn get decisionBy => text().references(Users, #id).nullable()();
   DateTimeColumn get decisionAt => dateTime().nullable()();
@@ -519,8 +525,9 @@ class PostFlightNotes extends Table {
   TextColumn get followUpAssignedTo =>
       text().references(Users, #id).nullable()();
   DateTimeColumn get followUpDueDate => dateTime().nullable()();
-  TextColumn get followUpStatus =>
-      text().withDefault(const Constant('PENDING'))();
+  TextColumn get followUpStatus => text()
+      .withDefault(const Constant(FollowUpStatus.pending))
+      .check(followUpStatus.isIn(FollowUpStatus.all))();
   TextColumn get notes => text().nullable()();
   TextColumn get createdBy => text().references(Users, #id)();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
@@ -544,6 +551,8 @@ class ChecklistOverrides extends Table {
 }
 
 @TableIndex(name: 'idx_audit_events_entity', columns: {#entityType, #entityId})
+@TableIndex(name: 'idx_audit_events_session_id', columns: {#sessionId})
+@TableIndex(name: 'idx_audit_events_flight_id', columns: {#flightId})
 class AuditEvents extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get entityType =>
@@ -556,6 +565,10 @@ class AuditEvents extends Table {
   TextColumn get performedBy => text().references(Users, #id)();
   DateTimeColumn get performedAt =>
       dateTime().withDefault(currentDateAndTime)();
+  // The session / sortie an event belongs to, so a record's audit trail is
+  // one indexed query. Null for fleet-wide events (vehicles, payloads...).
+  TextColumn get sessionId => text().nullable()();
+  TextColumn get flightId => text().nullable()();
 }
 
 @TableIndex(
@@ -679,6 +692,14 @@ class LocalAuthSessions extends Table {
   ],
 )
 class AppDatabase extends _$AppDatabase {
+  /// Namespace for the ids of data the app creates itself.
+  static const _seedNamespace = '6f1c2a54-3b9e-5d7a-8c41-2e9f0b7d5a13';
+
+  /// The same id on every install for the same default record (the
+  /// "Cerana" vehicle, its v1 checklist, ...), so records from several
+  /// phones can be merged once sync exists. [key] names the record.
+  static String _seedId(String key) => const Uuid().v5(_seedNamespace, key);
+
   static const _log = AppLogger('AppDatabase');
 
   AppDatabase() : super(_openConnection());
@@ -695,7 +716,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 12;
+  int get schemaVersion => 13;
 
   @override
   MigrationStrategy get migration {
@@ -765,6 +786,24 @@ class AppDatabase extends _$AppDatabase {
           await m.addColumn(postFlightNotes, postFlightNotes.landedBatteryVoltage);
           await m.addColumn(postFlightNotes, postFlightNotes.landedBatteryPercent);
         }
+        if (from < 13) {
+          // Statuses become fixed lists (CHECK constraints). Map leftovers
+          // first: the old landing flow wrote LANDED for a flown sortie.
+          await customStatement(
+            "UPDATE sorties SET flight_status = 'FLOWN' "
+            "WHERE flight_status = 'LANDED'",
+          );
+          // SQLite can't add a CHECK to a table: rebuild these three.
+          await m.alterTable(TableMigration(sorties));
+          await m.alterTable(TableMigration(fieldSessions));
+          await m.alterTable(TableMigration(postFlightNotes));
+
+          await m.addColumn(auditEvents, auditEvents.sessionId);
+          await m.addColumn(auditEvents, auditEvents.flightId);
+          await m.createIndex(idxAuditEventsSessionId);
+          await m.createIndex(idxAuditEventsFlightId);
+          await _backfillAuditScope();
+        }
       },
       // SQLite ignores `references(...)` unless this is on for each
       // connection. It runs after migrations, so seeding isn't affected.
@@ -773,6 +812,39 @@ class AppDatabase extends _$AppDatabase {
         if (AppLogger.enabled) await _logForeignKeyProblems();
       },
     );
+  }
+
+  /// Tags existing audit events with their session / sortie (v13), using
+  /// the same lookups as new events.
+  Future<void> _backfillAuditScope() async {
+    for (final MapEntry(key: type, value: sql) in auditFlightScopeSql.entries) {
+      await customStatement(
+        'UPDATE audit_events SET flight_id = '
+        '(${sql.replaceFirst('?', 'audit_events.entity_id')}) '
+        "WHERE entity_type = '$type' AND flight_id IS NULL",
+      );
+    }
+    // Older answers / batteries were audited as "flightId:itemId".
+    await customStatement(
+      'UPDATE audit_events SET flight_id = '
+      "substr(entity_id, 1, instr(entity_id, ':') - 1) "
+      "WHERE entity_type IN ('CHECKLIST_RESPONSE', 'SORTIE_BATTERY') "
+      "AND flight_id IS NULL AND instr(entity_id, ':') > 0",
+    );
+    await customStatement(
+      'UPDATE audit_events SET session_id = '
+      '(SELECT session_id FROM sorties '
+      'WHERE sorties.flight_id = audit_events.flight_id) '
+      'WHERE flight_id IS NOT NULL AND session_id IS NULL',
+    );
+    for (final MapEntry(key: type, value: sql)
+        in auditSessionScopeSql.entries) {
+      await customStatement(
+        'UPDATE audit_events SET session_id = '
+        '(${sql.replaceFirst('?', 'audit_events.entity_id')}) '
+        "WHERE entity_type = '$type' AND session_id IS NULL",
+      );
+    }
   }
 
   /// Debug logs only: rows written before foreign keys were enforced that
@@ -814,7 +886,7 @@ class AppDatabase extends _$AppDatabase {
     for (final item in items) {
       await into(checklistItems).insert(
         ChecklistItemsCompanion.insert(
-          id: uuid.v4(),
+          id: _seedId('item:$templateId:${item.section}:${item.label}'),
           templateId: templateId,
           section: item.section,
           label: item.label,
@@ -862,7 +934,7 @@ class AppDatabase extends _$AppDatabase {
       final nextVersion =
           versions.fold<int>(0, (max, t) => t.version > max ? t.version : max) +
           1;
-      final templateId = uuid.v4();
+      final templateId = _seedId('template:${vehicle.id}:v$nextVersion');
       final now = DateTime.now();
 
       if (active != null) {
@@ -893,7 +965,7 @@ class AppDatabase extends _$AppDatabase {
         if (item.label == 'Visual inspection complete') continue;
         await into(checklistItems).insert(
           ChecklistItemsCompanion.insert(
-            id: uuid.v4(),
+            id: _seedId('item:$templateId:${item.section}:${item.label}'),
             templateId: templateId,
             section: item.section,
             label: item.label,
@@ -958,7 +1030,7 @@ class AppDatabase extends _$AppDatabase {
       final nextVersion =
           versions.fold<int>(0, (max, t) => t.version > max ? t.version : max) +
           1;
-      final templateId = uuid.v4();
+      final templateId = _seedId('template:${vehicle.id}:v$nextVersion');
       final now = DateTime.now();
 
       await (update(
@@ -984,7 +1056,7 @@ class AppDatabase extends _$AppDatabase {
       for (final item in oldItems) {
         await into(checklistItems).insert(
           ChecklistItemsCompanion.insert(
-            id: uuid.v4(),
+            id: _seedId('item:$templateId:${item.section}:${item.label}'),
             templateId: templateId,
             section: item.section,
             label: item.label,
@@ -1058,7 +1130,7 @@ class AppDatabase extends _$AppDatabase {
       final nextVersion =
           versions.fold<int>(0, (max, t) => t.version > max ? t.version : max) +
           1;
-      final templateId = uuid.v4();
+      final templateId = _seedId('template:${vehicle.id}:v$nextVersion');
       final now = DateTime.now();
 
       await (update(
@@ -1084,7 +1156,7 @@ class AppDatabase extends _$AppDatabase {
       for (final item in oldItems) {
         await into(checklistItems).insert(
           ChecklistItemsCompanion.insert(
-            id: uuid.v4(),
+            id: _seedId('item:$templateId:${item.section}:${item.label}'),
             templateId: templateId,
             section: item.section,
             label: item.label,
@@ -1128,15 +1200,10 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
-  /// Limits payloads to specific vehicles where the team's list says so:
-  /// Motion Metrics IP is only for Dorsata and Cerana. Skips a payload that
-  /// already has limits, and vehicles/payloads that don't exist.
+  /// Limits payloads to specific fleet vehicles where `seedPayloads` says
+  /// so. Skips a payload that already has limits, and vehicles/payloads
+  /// that don't exist.
   Future<void> _insertDefaultPayloadVehicleLimits() async {
-    const limits = {
-      'Motion Metrics IP – Ethernet': ['Dorsata', 'Cerana'],
-    };
-    const uuid = Uuid();
-
     final payloadsByName = {
       for (final payload in await select(payloads).get())
         payload.name.trim().toLowerCase(): payload,
@@ -1147,20 +1214,20 @@ class AppDatabase extends _$AppDatabase {
     };
 
     var added = 0;
-    for (final entry in limits.entries) {
-      final payload = payloadsByName[entry.key.toLowerCase()];
+    for (final seed in seedPayloads.where((p) => p.onlyVehicles.isNotEmpty)) {
+      final payload = payloadsByName[seed.name.toLowerCase()];
       if (payload == null) continue;
       final existing = await (select(
         payloadVehicles,
       )..where((t) => t.payloadId.equals(payload.payloadId))).get();
       if (existing.isNotEmpty) continue;
 
-      for (final vehicleName in entry.value) {
-        final vehicle = vehiclesByName[vehicleName.toLowerCase()];
+      for (final vehicleKey in seed.onlyVehicles) {
+        final vehicle = vehiclesByName[_seedVehicleName(vehicleKey)];
         if (vehicle == null) continue;
         await into(payloadVehicles).insert(
           PayloadVehiclesCompanion.insert(
-            id: uuid.v4(),
+            id: _seedId('payload-vehicle:${payload.payloadId}:${vehicle.id}'),
             payloadId: payload.payloadId,
             vehicleId: vehicle.id,
           ),
@@ -1171,144 +1238,14 @@ class AppDatabase extends _$AppDatabase {
     const AppLogger('AppDatabase').i('payload vehicle limits: $added added');
   }
 
-  /// Writes the standard "equipment to bring" lists (from the team's
-  /// sheets): Tools for every session, plus Kari, Dorsata and Cerana. A list
-  /// is skipped if its vehicle is missing or it already has items. Like the
-  /// other defaults, runs only from migrations. "4+1" counts are stored as 5.
-  Future<void> _insertDefaultEquipmentLists() async {
-    // (item, quantity, spares); null = blank on the sheet.
-    const tools = <(String, int?, int?)>[
-      ('Tweezers', 1, null),
-      ('Nipper', 1, null),
-      ('Nose Plier', 1, null),
-      ('Cutting Plier', 1, null),
-      ('Bosch Kit', 1, null),
-      ('Cutter', 1, null),
-      ('GF Tape', 2, null),
-      ('3M Tape', 1, null),
-      ('Double Sided Tape', 1, null),
-      ('Insulation tape', 1, null),
-      ('Stapler', 1, null),
-      ('Chordless Drill', 1, null),
-      ('Drill bit set', 1, null),
-      ('Zip Ties Set', 3, null),
-      ('MobileTripod', 1, null),
-      ('RTK Tripod(If required)', 1, null),
-      ('Alen key set', 1, null),
-      ('Heat Shrink Set', 1, null),
-      ('Gas Torch', 1, null),
-      ('Multimeter', 1, null),
-      ('Clampmeter', 1, null),
-      ('Temperature gun', 1, null),
-      ('Rubber Bands', null, null),
-      ('Soldering iron', 1, null),
-      ('Soldering tin lead', 1, null),
-      ('Soldering Flux', 1, null),
-      ('Feviquick', 1, null),
-    ];
-    const powerSystems = <(String, int?, int?)>[
-      ('Batteries', null, null),
-      ('Battery Charger', 1, null),
-      ('Battery Charging Chord', 1, null),
-      ('Battery XT60 to XT90 Connectors', 2, null),
-      ('Power Station', 1, null),
-      ('Power Station Chord', 1, null),
-      ('Power Station plug extension', 1, null),
-    ];
-    const elrsP900Comms = <(String, int?, int?)>[
-      ('Transmitter MKIII', 1, null),
-      ('ELRS Module (In case of MKII)', 1, null),
-      ('ELRS receiver', 1, null),
-      ('ELRS Antennas', 2, null),
-      ('P900 Air unit', 1, null),
-      ('P900 Ground unit', 1, null),
-      ('P900 Antenas', 2, null),
-      ('3S Battery', 1, null),
-      ('3S Battery Connector', 1, null),
-      ('Type C-USB Cable', 1, null),
-    ];
-    const vehicleLists = <String, List<(String, List<(String, int?, int?)>)>>{
-      'Kari': [
-        (
-          'Airframe',
-          [
-            ('Drone Frame', 1, null),
-            ('Motors', 4, null),
-            ('Propellers', 4, 4),
-            ('Propeller Bolts(If props are not installed)', 4, null),
-            ('Battery Straps', 2, null),
-          ],
-        ),
-        (
-          'Subsystems',
-          [('GPS', 1, 1), ('Battery XT60 to XT90 connector', 2, null)],
-        ),
-        (
-          'Communication Systems',
-          [
-            ('Transmitter MKII', 1, null),
-            ('PPM receiver', 1, null),
-            ('P900 Antennas AU', 2, null),
-            ('RFD900 Air unit', 1, null),
-            ('RFD900 Ground unit', 1, null),
-            ('RFD900 Antenas GU', 2, null),
-          ],
-        ),
-        ('Power Systems', powerSystems),
-      ],
-      'Dorsata': [
-        (
-          'Airframe',
-          [
-            ('Drone Frame', 1, null),
-            ('Motors', 4, null),
-            ('Propellers', 4, 4),
-            ('Propeller Bolts(If props are not installed)', 4, null),
-            ('Battery Straps', 2, null),
-          ],
-        ),
-        (
-          'Subsystems',
-          [
-            ('GPS', 1, 1),
-            ('Battery Y Splitter', 1, null),
-            ('Battery XT60 to XT90 connector', 2, null),
-          ],
-        ),
-        ('Communication Systems', elrsP900Comms),
-        ('Power Systems', powerSystems),
-      ],
-      'Cerana': [
-        (
-          'Airframe',
-          [
-            ('Fuselage', 1, null),
-            ('Wings', 2, null),
-            ('Spars', 2, null),
-            ('Motors', 5, null), // 4+1
-            ('Propellers', 5, 5), // 4+1, spares 4+1
-            ('Propeller Bolts(If props are not installed)', 5, null), // 4+1
-            ('Pusher Motor Bolt', 1, null),
-            ('Battery Straps', 2, null),
-            ('Canopies', 2, null),
-            ('Canopy Bolts', null, null),
-          ],
-        ),
-        (
-          'Subsystems',
-          [
-            ('GPS', 1, 1),
-            ('Airspeed Sensor cap', 1, null),
-            ('Battery Y Splitter', 1, null),
-            ('Battery XT60 to XT90 connector', 2, null),
-          ],
-        ),
-        ('Communication Systems', elrsP900Comms),
-        ('Power Systems', powerSystems),
-      ],
-    };
-    const uuid = Uuid();
+  /// The (lower-case) name of the fleet vehicle with seed [key].
+  static String _seedVehicleName(String key) =>
+      seedFleet.firstWhere((v) => v.key == key).name.toLowerCase();
 
+  /// Writes the standard equipment lists (`seed/default_equipment.dart`):
+  /// Tools, plus each fleet vehicle's list. A list is skipped if its vehicle
+  /// is missing or it already has items. Runs only from migrations.
+  Future<void> _insertDefaultEquipmentLists() async {
     await _ensureSystemUser();
 
     Future<bool> hasItems(String? vehicleId) async {
@@ -1323,8 +1260,9 @@ class AppDatabase extends _$AppDatabase {
     }
 
     Future<void> writeList(
+      String listKey,
       String? vehicleId,
-      List<(String, List<(String, int?, int?)>)> categories,
+      List<SeedEquipmentCategory> categories,
     ) async {
       for (var c = 0; c < categories.length; c++) {
         final (category, items) = categories[c];
@@ -1332,7 +1270,8 @@ class AppDatabase extends _$AppDatabase {
           final (name, quantity, spares) = items[i];
           await into(equipmentTemplateItems).insert(
             EquipmentTemplateItemsCompanion.insert(
-              id: uuid.v4(),
+              // By name, not position: reordering the seed keeps ids.
+              id: _seedId('equipment:$listKey:$category:$name'),
               vehicleId: Value(vehicleId),
               category: category,
               name: name,
@@ -1358,7 +1297,7 @@ class AppDatabase extends _$AppDatabase {
 
     var written = 0;
     if (!await hasItems(null)) {
-      await writeList(null, [('Tools', tools)]);
+      await writeList('tools', null, [('Tools', seedTools)]);
       written++;
     }
 
@@ -1366,60 +1305,20 @@ class AppDatabase extends _$AppDatabase {
       for (final vehicle in await select(vehicles).get())
         vehicle.name.trim().toLowerCase(): vehicle,
     };
-    for (final entry in vehicleLists.entries) {
-      final vehicle = vehiclesByName[entry.key.toLowerCase()];
+    for (final MapEntry(key: vehicleKey, value: categories)
+        in seedVehicleEquipment.entries) {
+      final vehicle = vehiclesByName[_seedVehicleName(vehicleKey)];
       if (vehicle == null || await hasItems(vehicle.id)) continue;
-      await writeList(vehicle.id, entry.value);
+      await writeList(vehicleKey, vehicle.id, categories);
       written++;
     }
     const AppLogger('AppDatabase').i('default equipment lists: $written added');
   }
 
-  /// Writes the team's standard payloads and the vehicle types each fits.
-  /// Like [_insertDefaultFleet], runs only from migrations and skips names
+  /// Writes the standard payloads (`seed/default_payloads.dart`) and the
+  /// vehicle types each fits. Runs only from migrations and skips names
   /// that already exist (any status).
   Future<void> _insertDefaultPayloads() async {
-    const allTypes = ['MULTIROTOR', 'VTOL', 'FIXED_WING'];
-    const payloadsToAdd = [
-      (
-        name: 'Jetson Orin Nano 8GB',
-        category: 'Companion Computer',
-        storageType: 'SD card + NVMe SSD',
-        storageCapacity: '64GB / 128GB SD',
-        vehicleTypes: allTypes,
-      ),
-      (
-        name: 'Pi 5 – 8GB',
-        category: 'Companion Computer',
-        storageType: 'SD card',
-        storageCapacity: '64GB',
-        vehicleTypes: allTypes,
-      ),
-      (
-        name: 'FLIR Camera – USB',
-        category: 'Mono Camera, RGB',
-        storageType: null,
-        storageCapacity: null,
-        vehicleTypes: allTypes,
-      ),
-      (
-        name: 'Lucid Camera – Ethernet',
-        category: 'RGB Camera',
-        storageType: null,
-        storageCapacity: null,
-        vehicleTypes: allTypes,
-      ),
-      (
-        // Meant for Dorsata / Cerana (maybe Kari later); stored by type.
-        name: 'Motion Metrics IP – Ethernet',
-        category: 'Thermal',
-        storageType: null,
-        storageCapacity: null,
-        vehicleTypes: ['MULTIROTOR', 'VTOL'],
-      ),
-    ];
-    const uuid = Uuid();
-
     await _ensureSystemUser();
 
     final existingNames = {
@@ -1428,10 +1327,10 @@ class AppDatabase extends _$AppDatabase {
     };
 
     var added = 0;
-    for (final payload in payloadsToAdd) {
+    for (final payload in seedPayloads) {
       if (existingNames.contains(payload.name.toLowerCase())) continue;
 
-      final payloadId = uuid.v4();
+      final payloadId = _seedId('payload:${payload.key}');
       await into(payloads).insert(
         PayloadsCompanion.insert(
           payloadId: payloadId,
@@ -1444,7 +1343,7 @@ class AppDatabase extends _$AppDatabase {
       for (final type in payload.vehicleTypes) {
         await into(payloadVehicleCompatibility).insert(
           PayloadVehicleCompatibilityCompanion.insert(
-            id: uuid.v4(),
+            id: _seedId('payload-type:$payloadId:$type'),
             payloadId: payloadId,
             vehicleType: type,
           ),
@@ -1465,40 +1364,10 @@ class AppDatabase extends _$AppDatabase {
     const AppLogger('AppDatabase').i('default payloads: $added added');
   }
 
-  /// Writes the team's standard fleet into this database. Runs only from
-  /// migrations (first creation / upgrade), so the values below are starting
-  /// data: afterwards vehicles are read from and edited in the `vehicles` table.
+  /// Writes the standard fleet (`seed/default_fleet.dart`), each vehicle
+  /// with its type's checklist. Runs only from migrations (first creation /
+  /// upgrade); afterwards vehicles are edited in the `vehicles` table.
   Future<void> _insertDefaultFleet() async {
-    const fleet = [
-      (
-        name: 'Cerana',
-        type: 'VTOL',
-        motorCount: 5, // 4 lift + 1 pusher
-        frameMake: 'Carbon composite',
-        frameModel: 'Fixed',
-      ),
-      (
-        name: 'Dorsata',
-        type: 'MULTIROTOR',
-        motorCount: 4,
-        frameMake: 'Carbon composite',
-        frameModel: 'Fixed',
-      ),
-      (
-        name: 'Kari',
-        type: 'MULTIROTOR',
-        motorCount: 4,
-        frameMake: 'Carbon fiber',
-        frameModel: 'Fixed',
-      ),
-      (
-        name: 'Striver',
-        type: 'VTOL',
-        motorCount: 5, // 4 lift + 1 pusher
-        frameMake: 'EPP and carbon',
-        frameModel: 'Folding',
-      ),
-    ];
     const uuid = Uuid();
 
     await _ensureSystemUser();
@@ -1510,11 +1379,11 @@ class AppDatabase extends _$AppDatabase {
     };
 
     var added = 0;
-    for (final vehicle in fleet) {
+    for (final vehicle in seedFleet) {
       if (existingNames.contains(vehicle.name.toLowerCase())) continue;
 
-      final vehicleId = uuid.v4();
-      final templateId = uuid.v4();
+      final vehicleId = _seedId('vehicle:${vehicle.key}');
+      final templateId = _seedId('template:$vehicleId:v1');
       await into(vehicles).insert(
         VehiclesCompanion.insert(
           id: vehicleId,
