@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoPicker;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -43,7 +44,10 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
   final _objectiveNotes = TextEditingController();
   final _batteryVoltage = TextEditingController();
   final _batteryPercent = TextEditingController();
-  final _durationMinutes = TextEditingController();
+  /// Shows the picked flight duration ("1 h 25 min"); the value itself is
+  /// [_durationMins].
+  final _durationText = TextEditingController();
+  int? _durationMins;
   final _issues = TextEditingController();
   final _damage = TextEditingController();
   final _logLocation = TextEditingController();
@@ -102,7 +106,7 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
       _objectiveNotes,
       _batteryVoltage,
       _batteryPercent,
-      _durationMinutes,
+      _durationText,
       _issues,
       _damage,
       _logLocation,
@@ -125,8 +129,8 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
   /// Required battery & duration fields still empty.
   List<String> get _missingBattery => [
     if (_batteryVoltage.text.trim().isEmpty) 'voltage',
-    if (_batteryPercent.text.trim().isEmpty) '%',
-    if (_durationMinutes.text.trim().isEmpty) 'duration',
+    if (_batteryPercent.text.trim().isEmpty) 'percent',
+    if (_durationMins == null) 'duration',
   ];
 
   /// Required mission fields still empty.
@@ -296,13 +300,16 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
       expanded: _open.contains('battery'),
       onToggle: () => _toggle('battery'),
       children: [
+        // Short labels with the unit at the end, so both fit side by side.
+        const Text('Battery', style: AppTextStyles.label),
+        const SizedBox(height: 6),
         Row(
           children: [
             Expanded(
               child: _numberField(
                 _batteryVoltage,
-                label: 'Landed battery voltage (V)',
-                icon: Icons.battery_charging_full,
+                label: 'Voltage',
+                unit: 'V',
                 decimal: true,
               ),
             ),
@@ -310,17 +317,24 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
             Expanded(
               child: _numberField(
                 _batteryPercent,
-                label: 'Landed battery %',
-                icon: Icons.percent,
+                label: 'Percent',
+                unit: '%',
               ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
-        _numberField(
-          _durationMinutes,
-          label: 'Flight duration (minutes)',
-          icon: Icons.timer_outlined,
+        const SizedBox(height: 12),
+        const Text('Duration', style: AppTextStyles.label),
+        const SizedBox(height: 6),
+        // Picked on a scroller: no typing.
+        TextField(
+          controller: _durationText,
+          readOnly: true,
+          showCursor: false,
+          onTap: _pickDuration,
+          decoration: AppDecorations.field(
+            label: 'Flight duration',
+          ).copyWith(suffixIcon: const Icon(Icons.unfold_more)),
         ),
       ],
     );
@@ -552,7 +566,7 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
   Widget _numberField(
     TextEditingController controller, {
     required String label,
-    required IconData icon,
+    required String unit,
     bool decimal = false,
   }) {
     return TextField(
@@ -570,8 +584,105 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
         ),
       ],
       onChanged: (_) => _refresh(),
-      decoration: AppDecorations.field(label: label, icon: icon),
+      // The unit as a suffix icon: plain suffix text only shows once the
+      // field is focused or filled.
+      decoration: AppDecorations.field(label: label).copyWith(
+        suffixIcon: Padding(
+          padding: const EdgeInsets.only(right: 12),
+          child: Text(unit, style: AppTextStyles.bodyStrong),
+        ),
+        suffixIconConstraints: const BoxConstraints(),
+      ),
     );
+  }
+
+  /// Flight duration on two scrollers: hours and minutes.
+  static const _maxDurationHours = 24;
+
+  Future<void> _pickDuration() async {
+    FocusScope.of(context).unfocus();
+    final start = _durationMins ?? 10;
+    var hours = (start ~/ 60).clamp(0, _maxDurationHours);
+    var minutes = start % 60;
+
+    Widget wheel({
+      required int count,
+      required int initial,
+      required String unit,
+      required ValueChanged<int> onChanged,
+    }) => Expanded(
+      child: CupertinoPicker(
+        itemExtent: 40,
+        scrollController: FixedExtentScrollController(initialItem: initial),
+        onSelectedItemChanged: onChanged,
+        children: [
+          for (var i = 0; i < count; i++) Center(child: Text('$i $unit')),
+        ],
+      ),
+    );
+
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(left: 16),
+                  child: Text(
+                    'Flight duration',
+                    style: AppTextStyles.sectionHeader,
+                  ),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () =>
+                      Navigator.of(context).pop(hours * 60 + minutes),
+                  child: const Text('Done'),
+                ),
+              ],
+            ),
+            SizedBox(
+              height: 200,
+              child: Row(
+                children: [
+                  wheel(
+                    count: _maxDurationHours + 1,
+                    initial: hours,
+                    unit: 'h',
+                    onChanged: (value) => hours = value,
+                  ),
+                  wheel(
+                    count: 60,
+                    initial: minutes,
+                    unit: 'min',
+                    onChanged: (value) => minutes = value,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    _log.d('flight duration: $picked min');
+    setState(() => _setDuration(picked));
+  }
+
+  void _setDuration(int? minutes) {
+    _durationMins = minutes;
+    _durationText.text = minutes == null ? '' : _formatDuration(minutes);
+  }
+
+  /// 85 -> "1 h 25 min", 60 -> "1 h", 25 -> "25 min".
+  static String _formatDuration(int minutes) {
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    if (h == 0) return '$m min';
+    return m == 0 ? '$h h' : '$h h $m min';
   }
 
   // Load / save
@@ -599,7 +710,7 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
     _logLocation.text = note.logLocation ?? '';
     _logNotes.text = note.logNotes ?? '';
     final seconds = note.flightDurationSeconds;
-    _durationMinutes.text = seconds == null ? '' : '${(seconds / 60).round()}';
+    _setDuration(seconds == null ? null : (seconds / 60).round());
     final voltage = note.landedBatteryVoltage;
     _batteryVoltage.text = voltage == null
         ? ''
@@ -646,7 +757,7 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
       return;
     }
 
-    final minutes = int.tryParse(_durationMinutes.text.trim());
+    final minutes = _durationMins;
     final performedBy = await _performedBy();
     final saved = await _cubit.saveAndClose(
       flightId: widget.flightId,
@@ -712,8 +823,7 @@ class _PostFlightNotesPageState extends State<PostFlightNotesPage> {
         '${_batteryVoltage.text.trim()} V',
       if (_batteryPercent.text.trim().isNotEmpty)
         '${_batteryPercent.text.trim()}%',
-      if (_durationMinutes.text.trim().isNotEmpty)
-        '${_durationMinutes.text.trim()} min',
+      if (_durationMins != null) _formatDuration(_durationMins!),
     ];
     return parts.join(' · ');
   }

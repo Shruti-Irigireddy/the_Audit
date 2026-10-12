@@ -716,7 +716,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration {
@@ -803,6 +803,11 @@ class AppDatabase extends _$AppDatabase {
           await m.createIndex(idxAuditEventsSessionId);
           await m.createIndex(idxAuditEventsFlightId);
           await _backfillAuditScope();
+        }
+        if (from < 14) {
+          // Data only: default equipment lists added since (Striver's).
+          // Lists that already exist are left as they are.
+          await _insertDefaultEquipmentLists();
         }
       },
       // SQLite ignores `references(...)` unless this is on for each

@@ -211,8 +211,17 @@ void main() {
         hasLength(10),
       );
 
+      // Striver gets Cerana's list, as its own copy (separate ids).
+      final striver = await dao.getTemplateItems(
+        vehicleId: vehicles['Striver']!.id,
+      );
+      String row(EquipmentTemplateItem t) =>
+          '${t.category}|${t.name}|${t.quantity}|${t.spares}';
+      expect(striver.map(row), cerana.map(row));
       expect(
-        await dao.getTemplateItems(vehicleId: vehicles['Striver']!.id),
+        striver.map((t) => t.id).toSet().intersection({
+          for (final t in cerana) t.id,
+        }),
         isEmpty,
       );
       expect(await db.select(db.syncQueue).get(), isEmpty);
@@ -229,8 +238,18 @@ void main() {
               email: 'tester@example.com',
             ),
           );
+      // A vehicle with no list yet.
+      await db
+          .into(db.vehicles)
+          .insert(
+            VehiclesCompanion.insert(
+              id: 'test-drone',
+              name: 'Test drone',
+              type: 'MULTIROTOR',
+            ),
+          );
       final striver = (await db.vehicleDao.getActiveVehicles()).firstWhere(
-        (v) => v.name == 'Striver',
+        (v) => v.id == 'test-drone',
       );
       final dao = db.equipmentDao;
 

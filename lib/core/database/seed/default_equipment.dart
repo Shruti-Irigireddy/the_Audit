@@ -119,32 +119,37 @@ const seedVehicleEquipment = <String, List<SeedEquipmentCategory>>{
     ('Communication Systems', _elrsP900Comms),
     ('Power Systems', _powerSystems),
   ],
-  'cerana': [
-    (
-      'Airframe',
-      [
-        ('Fuselage', 1, null),
-        ('Wings', 2, null),
-        ('Spars', 2, null),
-        ('Motors', 5, null), // 4+1
-        ('Propellers', 5, 5), // 4+1, spares 4+1
-        ('Propeller Bolts(If props are not installed)', 5, null), // 4+1
-        ('Pusher Motor Bolt', 1, null),
-        ('Battery Straps', 2, null),
-        ('Canopies', 2, null),
-        ('Canopy Bolts', null, null),
-      ],
-    ),
-    (
-      'Subsystems',
-      [
-        ('GPS', 1, 1),
-        ('Airspeed Sensor cap', 1, null),
-        ('Battery Y Splitter', 1, null),
-        ('Battery XT60 to XT90 connector', 2, null),
-      ],
-    ),
-    ('Communication Systems', _elrsP900Comms),
-    ('Power Systems', _powerSystems),
-  ],
+  'cerana': _ceranaAndStriver,
+  // Same list as Cerana (its own copy: editing one doesn't change the other).
+  'striver': _ceranaAndStriver,
 };
+
+/// Cerana's list, also used for Striver.
+const _ceranaAndStriver = <SeedEquipmentCategory>[
+  (
+    'Airframe',
+    [
+      ('Fuselage', 1, null),
+      ('Wings', 2, null),
+      ('Spars', 2, null),
+      ('Motors', 5, null), // 4+1
+      ('Propellers', 5, 5), // 4+1, spares 4+1
+      ('Propeller Bolts(If props are not installed)', 5, null), // 4+1
+      ('Pusher Motor Bolt', 1, null),
+      ('Battery Straps', 2, null),
+      ('Canopies', 2, null),
+      ('Canopy Bolts', null, null),
+    ],
+  ),
+  (
+    'Subsystems',
+    [
+      ('GPS', 1, 1),
+      ('Airspeed Sensor cap', 1, null),
+      ('Battery Y Splitter', 1, null),
+      ('Battery XT60 to XT90 connector', 2, null),
+    ],
+  ),
+  ('Communication Systems', _elrsP900Comms),
+  ('Power Systems', _powerSystems),
+];
