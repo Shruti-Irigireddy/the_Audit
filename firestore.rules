@@ -1,0 +1,22 @@
+rules_version = '2';
+
+// Firestore holds only the team directory: users/{uid} with name, email
+// and updatedAt (see lib/features/auth/data/user_directory.dart).
+// Paste into Firebase console -> Firestore Database -> Rules -> Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Any signed-in member can read the team list; each person can write
+    // only their own entry, and only these fields.
+    match /users/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.auth.uid == uid
+                   && request.resource.data.keys().hasOnly(['name', 'email', 'updatedAt']);
+    }
+
+    // Nothing else is stored here, so nothing else is reachable.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

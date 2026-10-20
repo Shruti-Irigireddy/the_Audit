@@ -30,9 +30,9 @@ class PreFieldRepositoryImpl implements PreFieldRepository {
   Future<String> createFieldSession({
     String? sessionId,
     required DateTime date,
-    required String locationName,
-    required double latitude,
-    required double longitude,
+    String? locationName,
+    double? latitude,
+    double? longitude,
     required String missionType,
     required String sessionStatus,
     required String createdBy,

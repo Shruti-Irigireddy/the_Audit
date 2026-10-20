@@ -84,6 +84,22 @@ class PreFlightRepositoryImpl implements PreFlightRepository {
   }
 
   @override
+  Future<void> updateSortieLocation({
+    required String flightId,
+    required double latitude,
+    required double longitude,
+    required String performedBy,
+  }) {
+    _log.t('updateSortieLocation(flightId: $flightId)');
+    return _preFlightDao.updateSortieLocation(
+      flightId: flightId,
+      latitude: latitude,
+      longitude: longitude,
+      performedBy: performedBy,
+    );
+  }
+
+  @override
   Future<void> updateSortieBasicInfo({
     required String flightId,
     String? picUserId,

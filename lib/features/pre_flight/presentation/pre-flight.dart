@@ -2,8 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart' show Position;
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import 'package:the_audit/core/errors/app_failure.dart';
+import 'package:the_audit/features/pre_flight/domain/entities/sortie_entity.dart';
+import 'package:the_audit/core/utils/location.dart';
 import 'package:the_audit/core/config/app_config.dart';
 import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/features/auth/data/user_repository.dart';
@@ -131,10 +135,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
 
   /// One card: "Common pre-flight" and the vehicle's checklist, each
   /// collapsible, with their sections collapsible inside.
-  Widget _buildChecklistCard(
-    PreFlightState state,
-    ChecklistProgress progress,
-  ) {
+  Widget _buildChecklistCard(PreFlightState state, ChecklistProgress progress) {
     final items = state.checklistItems;
     final common = [
       for (final item in items)
@@ -308,6 +309,19 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
     _loadUserNames();
   }
 
+  static bool _hasLocation(SortieEntity? sortie) =>
+      sortie != null && sortie.latitude != null && sortie.longitude != null;
+
+  Future<bool> _saveLocation(double latitude, double longitude) async {
+    final performedBy = await _performedBy();
+    return _cubit.updateSortieLocation(
+      flightId: widget.flightId,
+      latitude: latitude,
+      longitude: longitude,
+      performedBy: performedBy,
+    );
+  }
+
   Future<void> _loadUserNames() async {
     final names = await UserRepository(widget.database).getUserNames();
     if (!mounted) return;
@@ -334,7 +348,8 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
           ).showSnackBar(SnackBar(content: Text(state.errorMessage!)));
         },
         builder: (context, state) {
-          final goSaved = state.selectedSortie?.finalDecision == FinalDecision.go;
+          final goSaved =
+              state.selectedSortie?.finalDecision == FinalDecision.go;
           // Every item's answer and arming state, looked up once.
           final progress = ChecklistProgress(
             state.checklistResponses,
@@ -381,6 +396,15 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
                   // updates in place, so nothing here may change size then.
                   if (state.isLoading && state.checklistItems.isEmpty)
                     const LinearProgressIndicator(),
+                  if (state.selectedSortie case final sortie?) ...[
+                    _TakeoffLocationCard(
+                      key: ValueKey('location-${sortie.flightId}'),
+                      sortie: sortie,
+                      editable: sortie.flightStatus == FlightStatus.preflight,
+                      onSave: _saveLocation,
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   _ArmingStatusBar(
                     blocking: state.checklistItems
                         .where((item) => item.blocksArming)
@@ -399,6 +423,7 @@ class _PreFlightChecklistPageState extends State<PreFlightChecklistPage> {
                     FilledButton.icon(
                       onPressed:
                           state.isSaving ||
+                              !_hasLocation(state.selectedSortie) ||
                               state.checklistItems.any(progress.isBlocking)
                           ? null
                           : _readyToArm,
@@ -767,6 +792,190 @@ class _ChecklistSection extends StatelessWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Where the sortie takes off: latitude / longitude and the GPS button
+/// (the site's name is on the session). Saves once both are filled;
+/// required before READY TO ARM. A new sortie reads the GPS once on its
+/// own.
+class _TakeoffLocationCard extends StatefulWidget {
+  final SortieEntity sortie;
+  final bool editable;
+  final Future<bool> Function(double latitude, double longitude) onSave;
+
+  const _TakeoffLocationCard({
+    super.key,
+    required this.sortie,
+    required this.editable,
+    required this.onSave,
+  });
+
+  @override
+  State<_TakeoffLocationCard> createState() => _TakeoffLocationCardState();
+}
+
+class _TakeoffLocationCardState extends State<_TakeoffLocationCard> {
+  late final _latitude = TextEditingController(
+    text: widget.sortie.latitude?.toStringAsFixed(7) ?? '',
+  );
+  late final _longitude = TextEditingController(
+    text: widget.sortie.longitude?.toStringAsFixed(7) ?? '',
+  );
+  bool _locating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.editable && widget.sortie.latitude == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _useGps(automatic: true);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _latitude.dispose();
+    _longitude.dispose();
+    super.dispose();
+  }
+
+  double? _parse(TextEditingController c, double limit) {
+    final value = double.tryParse(c.text.trim());
+    return value == null || value < -limit || value > limit ? null : value;
+  }
+
+  bool get _complete =>
+      _parse(_latitude, 90) != null && _parse(_longitude, 180) != null;
+
+  /// Saves when complete and different from what's stored.
+  Future<void> _trySave() async {
+    if (!_complete) {
+      setState(() {});
+      return;
+    }
+    final lat = _parse(_latitude, 90)!;
+    final lng = _parse(_longitude, 180)!;
+    if (lat == widget.sortie.latitude && lng == widget.sortie.longitude) {
+      return;
+    }
+    _log.d('take-off coordinates complete; saving');
+    await widget.onSave(lat, lng);
+  }
+
+  void _fill(Position position) => setState(() {
+    _latitude.text = position.latitude.toStringAsFixed(7);
+    _longitude.text = position.longitude.toStringAsFixed(7);
+  });
+
+  Future<void> _useGps({bool automatic = false}) async {
+    _log.d(automatic ? 'auto take-off location' : 'GPS tapped');
+    setState(() => _locating = true);
+    try {
+      final position = await currentPosition(
+        onQuickFix: (quick) {
+          if (mounted) _fill(quick);
+        },
+        // Never jump to settings on its own; only when the user taps.
+        openSettings: !automatic,
+      );
+      if (!mounted) return;
+      _fill(position);
+      await _trySave();
+    } catch (error, stackTrace) {
+      _log.w('take-off GPS failed', error, stackTrace);
+      if (mounted && !automatic) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(friendlyError(error))));
+      }
+    } finally {
+      if (mounted) setState(() => _locating = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final saved =
+        widget.sortie.latitude != null && widget.sortie.longitude != null;
+    final coordinateFormatter = FilteringTextInputFormatter.allow(
+      RegExp(r'[-0-9.]'),
+    );
+    Widget coordinate(TextEditingController controller, String label) =>
+        Expanded(
+          child: TextField(
+            controller: controller,
+            enabled: widget.editable,
+            keyboardType: const TextInputType.numberWithOptions(
+              decimal: true,
+              signed: true,
+            ),
+            inputFormatters: [coordinateFormatter],
+            onChanged: (_) => setState(() {}),
+            onEditingComplete: _trySave,
+            onTapOutside: (_) => _trySave(),
+            decoration: AppDecorations.field(label: label),
+          ),
+        );
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: AppDecorations.panel,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Take-off coordinates',
+                  style: AppTextStyles.sectionHeader,
+                ),
+              ),
+              if (saved)
+                const Icon(
+                  Icons.check_circle,
+                  size: 18,
+                  color: AppColors.successGreen,
+                ),
+            ],
+          ),
+          if (!saved)
+            const Padding(
+              padding: EdgeInsets.only(top: 2),
+              child: Text(
+                'Required before READY TO ARM',
+                style: AppTextStyles.error,
+              ),
+            ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              coordinate(_latitude, 'Latitude'),
+              const SizedBox(width: 10),
+              coordinate(_longitude, 'Longitude'),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 52,
+                height: 56,
+                child: OutlinedButton(
+                  onPressed: !widget.editable || _locating ? null : _useGps,
+                  style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
+                  child: _locating
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.my_location),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

@@ -163,7 +163,11 @@ class _SessionTile extends StatelessWidget {
       child: ListTile(
         onTap: onTap,
         leading: const Icon(Icons.event_note_outlined),
-        title: Text(session.locationName, style: AppTextStyles.bodyStrong),
+        title: Text(
+          session.locationName ??
+              '${_titleCase(session.missionType)} session',
+          style: AppTextStyles.bodyStrong,
+        ),
         subtitle: Text(
           '${date.day}/${date.month}/${date.year} · '
           '${_titleCase(session.missionType)}',

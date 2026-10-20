@@ -218,6 +218,50 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
     ..where((v) => v.sessionId.equals(sessionId))
     ..orderBy([(v) => OrderingTerm.asc(v.sequenceNo)]);
 
+  /// Sets the sortie's take-off coordinates (pre-flight). Required before
+  /// Go; the site's name is on the session.
+  Future<void> updateSortieLocation({
+    required String flightId,
+    required double latitude,
+    required double longitude,
+    required String performedBy,
+  }) {
+    _log.t('updateSortieLocation(flightId: $flightId)');
+    return _log.trace(
+      'updateSortieLocation',
+      () => transaction(() async {
+        await _ensureSortieEditable(flightId);
+        if (latitude < -90 || latitude > 90) {
+          throw AppFailure('Latitude must be between -90 and 90.');
+        }
+        if (longitude < -180 || longitude > 180) {
+          throw AppFailure('Longitude must be between -180 and 180.');
+        }
+        await (update(
+          db.sorties,
+        )..where((v) => v.flightId.equals(flightId))).write(
+          SortiesCompanion(
+            latitude: Value(latitude),
+            longitude: Value(longitude),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
+        await insertAuditEvent(
+          entityType: 'SORTIE',
+          entityId: flightId,
+          action: 'UPDATE_LOCATION',
+          description: 'Take-off coordinates set',
+          performedBy: performedBy,
+        );
+        await enqueueSync(
+          entityType: 'SORTIE',
+          entityId: flightId,
+          operation: 'UPDATE',
+        );
+      }),
+    );
+  }
+
   Future<void> updateSortieBasicInfo({
     required String flightId,
     String? picUserId,
@@ -1346,6 +1390,10 @@ class PreFlightDao extends DatabaseAccessor<AppDatabase>
 
     if (sortie.picUserId.trim().isEmpty) {
       issues.add('PIC is required.');
+    }
+
+    if (sortie.latitude == null || sortie.longitude == null) {
+      issues.add('Take-off coordinates are required.');
     }
 
     // No battery selection (the Power item covers the battery), and only

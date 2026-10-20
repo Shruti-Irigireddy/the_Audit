@@ -9,6 +9,11 @@ class SortieEntity {
   final int checklistTemplateVersion;
   final DateTime? takeoffAt;
   final DateTime? landingAt;
+
+  /// Take-off location, set in pre-flight.
+  final String? locationName;
+  final double? latitude;
+  final double? longitude;
   final String flightStatus;
   final DateTime? closedAt;
   final String? closedBy;
@@ -30,6 +35,9 @@ class SortieEntity {
     required this.checklistTemplateVersion,
     this.takeoffAt,
     this.landingAt,
+    this.locationName,
+    this.latitude,
+    this.longitude,
     required this.flightStatus,
     this.closedAt,
     this.closedBy,

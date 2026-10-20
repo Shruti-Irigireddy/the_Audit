@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import 'package:the_audit/core/config/app_config.dart';
 import 'package:the_audit/core/database/database_constants.dart';
 import 'package:the_audit/core/errors/app_failure.dart';
 import 'package:the_audit/features/auth/data/current_user_repository.dart';
@@ -21,7 +20,6 @@ import 'package:the_audit/features/pre_field/presentation/cubit/pre_field_cubit.
 import 'package:the_audit/features/pre_field/presentation/cubit/pre_field_state.dart';
 import 'package:the_audit/features/pre_field/presentation/session_loop.dart';
 
-import 'package:geolocator/geolocator.dart';
 import 'package:flutter/services.dart';
 
 enum PreFieldMissionType {
@@ -135,9 +133,10 @@ class _CreateSessionView extends StatefulWidget {
 
 class _CreateSessionViewState extends State<_CreateSessionView> {
   final _formKey = GlobalKey<FormState>();
+
+  /// The site's name; each sortie records its own coordinates in
+  /// pre-flight.
   final _locationController = TextEditingController();
-  final _latitudeController = TextEditingController();
-  final _longitudeController = TextEditingController();
 
   final DateTime _sessionDate = DateTime.now();
   PreFieldMissionType _missionType = PreFieldMissionType.testing;
@@ -188,7 +187,6 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
   bool _showSelectionErrors = false;
   bool _loadingUsers = true;
   bool _submitting = false;
-  bool _gettingCurrentLocation = false;
 
   late final _setup = SessionSetupRepository(widget.database);
 
@@ -239,18 +237,12 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     _loadUsers();
     _loadEquipmentLists();
     _loadPayloads();
-    // Capture the site location as soon as the page opens (FR-PFT-02).
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _useCurrentLocation(automatic: true);
-    });
   }
 
   @override
   void dispose() {
     _log.t('dispose');
     _locationController.dispose();
-    _latitudeController.dispose();
-    _longitudeController.dispose();
     for (final controller in _objectiveControllers.values) {
       controller.dispose();
     }
@@ -512,77 +504,16 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
       children: [
         _DateField(selectedDate: _sessionDate),
         const SizedBox(height: 14),
-        _SessionTextField(
+        TextFormField(
           controller: _locationController,
-          label: 'Location name',
-          icon: Icons.place_outlined,
+          textCapitalization: TextCapitalization.words,
           textInputAction: TextInputAction.next,
-          validator: _requiredValidator,
-        ),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: _SessionTextField(
-                controller: _latitudeController,
-                label: 'Latitude',
-                icon: Icons.my_location,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-                inputFormatters: [
-                  _CoordinateInputFormatter(
-                    min: -90,
-                    max: 90,
-                    decimalPlaces: 7,
-                  ),
-                ],
-                textInputAction: TextInputAction.next,
-                validator: _latitudeValidator,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _SessionTextField(
-                controller: _longitudeController,
-                label: 'Longitude',
-                icon: Icons.explore_outlined,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-                inputFormatters: [
-                  _CoordinateInputFormatter(
-                    min: -180,
-                    max: 180,
-                    decimalPlaces: 7,
-                  ),
-                ],
-                textInputAction: TextInputAction.done,
-                validator: _longitudeValidator,
-              ),
-            ),
-            const SizedBox(width: 8),
-
-            SizedBox(
-              width: 52,
-              height: 56,
-              child: OutlinedButton(
-                onPressed: _gettingCurrentLocation
-                    ? null
-                    : () => _useCurrentLocation(),
-                style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
-                child: _gettingCurrentLocation
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.my_location),
-              ),
-            ),
-          ],
+          validator: (value) =>
+              (value ?? '').trim().isEmpty ? 'Required' : null,
+          decoration: AppDecorations.field(
+            label: 'Location name',
+            icon: Icons.place_outlined,
+          ),
         ),
         const SizedBox(height: 14),
         DropdownButtonFormField<PreFieldMissionType>(
@@ -1046,11 +977,6 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
                 '${_sessionDate.day}/${_sessionDate.month}/${_sessionDate.year}',
               ),
               line('Location', _locationController.text.trim()),
-              line(
-                'Coordinates',
-                '${_latitudeController.text.trim()}, '
-                    '${_longitudeController.text.trim()}',
-              ),
               line('Mission type', _humanize(_missionType.dbValue)),
               line('Status', _humanize(_sessionStatus.dbValue)),
             ],
@@ -1184,8 +1110,6 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
         await cubit.createFieldSession(
           date: _sessionDate,
           locationName: _locationController.text.trim(),
-          latitude: double.parse(_latitudeController.text.trim()),
-          longitude: double.parse(_longitudeController.text.trim()),
           missionType: _missionType.dbValue,
           sessionStatus: _sessionStatus.dbValue,
           createdBy: createdBy,
@@ -1336,133 +1260,6 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     } finally {
       if (mounted) setState(() => _loadingUsers = false);
     }
-  }
-
-  /// Fills latitude/longitude from the device GPS, asking for permission
-  /// first. [automatic] is the run on page open: it never jumps to system
-  /// settings and never overwrites coordinates the user has typed.
-  Future<void> _useCurrentLocation({bool automatic = false}) async {
-    _log.d(automatic ? 'auto location capture' : 'location button tapped');
-    await _log.trace('useCurrentLocation', () async {
-      setState(() => _gettingCurrentLocation = true);
-
-      // Values this run filled in, so they aren't mistaken for user input.
-      String? filledLat;
-      String? filledLng;
-      bool userTyped() {
-        final lat = _latitudeController.text.trim();
-        final lng = _longitudeController.text.trim();
-        return (lat.isNotEmpty && lat != filledLat) ||
-            (lng.isNotEmpty && lng != filledLng);
-      }
-
-      void fill(Position position) {
-        if (automatic && userTyped()) {
-          _log.d('auto location: kept user-typed coordinates');
-          return;
-        }
-        _setCoordinates(position);
-        filledLat = _latitudeController.text.trim();
-        filledLng = _longitudeController.text.trim();
-      }
-
-      try {
-        var permission = await Geolocator.checkPermission();
-        _log.d('location permission: ${permission.name}');
-
-        if (permission == LocationPermission.denied) {
-          permission = await Geolocator.requestPermission();
-          _log.d('location permission requested: ${permission.name}');
-        }
-
-        if (permission == LocationPermission.denied) {
-          _log.w('location permission denied');
-          _showSnack(
-            automatic
-                ? 'Location not shared. Enter coordinates or tap the location button.'
-                : 'Location permission denied.',
-          );
-          return;
-        }
-
-        if (permission == LocationPermission.deniedForever) {
-          _log.w('location permission denied forever');
-          _showSnack(
-            'Location permission permanently denied. Enable it from app settings.',
-          );
-          if (!automatic) await Geolocator.openAppSettings();
-          return;
-        }
-
-        final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-        _log.d('location service enabled: $serviceEnabled');
-
-        if (!serviceEnabled) {
-          _log.w('location service disabled');
-          _showSnack('Location is turned off. Please enable GPS/location.');
-          if (!automatic) await Geolocator.openLocationSettings();
-          return;
-        }
-
-        // Fill instantly from the cached fix, then refine with a fresh one.
-        final lastKnown = await Geolocator.getLastKnownPosition();
-        if (lastKnown != null && mounted) {
-          _log.d('using last known position ${_coords(lastKnown)}');
-          fill(lastKnown);
-        } else {
-          _log.d('no last known position');
-        }
-
-        const locationSettings = LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: AppConfig.gpsFixTimeLimit,
-        );
-
-        try {
-          final position = await Geolocator.getCurrentPosition(
-            locationSettings: locationSettings,
-          );
-          _log.i('location captured ${_coords(position)}');
-          if (!mounted) return;
-          if (automatic && userTyped()) {
-            _log.d('auto location: kept user-typed coordinates');
-            return;
-          }
-          fill(position);
-          _showSnack('Current location captured.');
-        } on TimeoutException {
-          if (lastKnown == null) {
-            _log.w('location fix timed out, no fallback');
-            rethrow;
-          }
-          _log.w('location fix timed out, kept last known position');
-          _showSnack('Using last known location; a precise fix timed out.');
-        }
-      } catch (error, stackTrace) {
-        _log.e('location capture failed', error, stackTrace);
-        _showSnack(
-          error is TimeoutException
-              ? 'Could not get a GPS fix in time. Try again or type the '
-                    'coordinates.'
-              : friendlyError(error),
-        );
-      } finally {
-        if (mounted) {
-          setState(() => _gettingCurrentLocation = false);
-        }
-      }
-    });
-  }
-
-  static String _coords(Position position) =>
-      '(${position.latitude.toStringAsFixed(3)}, '
-      '${position.longitude.toStringAsFixed(3)})';
-
-  void _setCoordinates(Position position) {
-    setState(() {
-      _latitudeController.text = position.latitude.toStringAsFixed(7);
-      _longitudeController.text = position.longitude.toStringAsFixed(7);
-    });
   }
 
   void _showSnack(String message) {
@@ -1845,55 +1642,6 @@ class _CreateSessionViewState extends State<_CreateSessionView> {
     AuthState authState,
   ) => CurrentUserRepository(database).resolvePerformedBy(authState);
 
-  String? _requiredValidator(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Required';
-    }
-    return null;
-  }
-
-  String? _latitudeValidator(String? value) {
-    return _coordinateRangeValidator(
-      value: value,
-      label: 'Latitude',
-      min: -90,
-      max: 90,
-    );
-  }
-
-  String? _longitudeValidator(String? value) {
-    return _coordinateRangeValidator(
-      value: value,
-      label: 'Longitude',
-      min: -180,
-      max: 180,
-    );
-  }
-
-  String? _coordinateRangeValidator({
-    required String? value,
-    required String label,
-    required double min,
-    required double max,
-  }) {
-    final clean = value?.trim() ?? '';
-
-    if (clean.isEmpty) {
-      return 'Required';
-    }
-
-    final parsed = double.tryParse(clean);
-
-    if (parsed == null) {
-      return 'Invalid $label';
-    }
-
-    if (parsed < min || parsed > max) {
-      return '$label must be between $min and $max';
-    }
-
-    return null;
-  }
 }
 
 /// "4", or "4 + 4 spare".
@@ -3113,77 +2861,3 @@ class _SectionShell extends StatelessWidget {
   }
 }
 
-class _SessionTextField extends StatelessWidget {
-  final TextEditingController controller;
-  final String label;
-  final IconData icon;
-  final TextInputType? keyboardType;
-  final TextInputAction? textInputAction;
-  final String? Function(String?)? validator;
-  final List<TextInputFormatter>? inputFormatters;
-
-  const _SessionTextField({
-    required this.controller,
-    required this.label,
-    required this.icon,
-    this.keyboardType,
-    this.textInputAction,
-    this.validator,
-    this.inputFormatters,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return TextFormField(
-      controller: controller,
-      keyboardType: keyboardType,
-      textInputAction: textInputAction,
-      validator: validator,
-      decoration: AppDecorations.field(label: label, icon: icon),
-    );
-  }
-}
-
-class _CoordinateInputFormatter extends TextInputFormatter {
-  final double min;
-  final double max;
-  final int decimalPlaces;
-
-  _CoordinateInputFormatter({
-    required this.min,
-    required this.max,
-    required this.decimalPlaces,
-  });
-
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    final text = newValue.text.trim();
-
-    if (text.isEmpty || text == '-' || text == '.' || text == '-.') {
-      return newValue;
-    }
-
-    final decimalRegex = RegExp(
-      r'^-?\d{0,3}(\.\d{0,' + decimalPlaces.toString() + r'})?$',
-    );
-
-    if (!decimalRegex.hasMatch(text)) {
-      return oldValue;
-    }
-
-    final parsed = double.tryParse(text);
-
-    if (parsed == null) {
-      return oldValue;
-    }
-
-    if (parsed < min || parsed > max) {
-      return oldValue;
-    }
-
-    return newValue;
-  }
-}

@@ -40,9 +40,10 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
   Future<String> createFieldSession({
     String? sessionId,
     required DateTime date,
-    required String locationName,
-    required double latitude,
-    required double longitude,
+    // The site is recorded per sortie now; these stay for older callers.
+    String? locationName,
+    double? latitude,
+    double? longitude,
     required String missionType,
     required String sessionStatus,
     required String createdBy,
@@ -58,9 +59,9 @@ class PreFieldDao extends DatabaseAccessor<AppDatabase>
           FieldSessionsCompanion.insert(
             sessionId: resolvedSessionId,
             date: date,
-            locationName: locationName,
-            latitude: latitude,
-            longitude: longitude,
+            locationName: Value(locationName),
+            latitude: Value(latitude),
+            longitude: Value(longitude),
             missionType: missionType,
             sessionStatus: sessionStatus,
           ),

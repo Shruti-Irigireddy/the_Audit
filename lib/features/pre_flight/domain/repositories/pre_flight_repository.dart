@@ -31,6 +31,14 @@ abstract class PreFlightRepository {
 
   Future<PreFlightSetupEntity> getPreFlightSetup(String flightId);
 
+  /// Sets the sortie's take-off coordinates (required before Go).
+  Future<void> updateSortieLocation({
+    required String flightId,
+    required double latitude,
+    required double longitude,
+    required String performedBy,
+  });
+
   Future<void> updateSortieBasicInfo({
     required String flightId,
     String? picUserId,

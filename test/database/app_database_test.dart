@@ -694,6 +694,12 @@ void main() {
           createdBy: 'u1',
         );
       }
+      await db.preFlightDao.updateSortieLocation(
+        flightId: flightId,
+        latitude: 12.97,
+        longitude: 77.59,
+        performedBy: 'u1',
+      );
 
       await db.preFlightDao.submitGoNoGoDecision(
         flightId: flightId,
@@ -846,6 +852,12 @@ void main() {
     );
 
     Future<void> passBlockingItems(String flightId) async {
+      await db.preFlightDao.updateSortieLocation(
+        flightId: flightId,
+        latitude: 12.97,
+        longitude: 77.59,
+        performedBy: 'u1',
+      );
       for (final item
           in await db.preFlightDao.loadBlockingChecklistItemsForSortie(
             flightId,
@@ -866,6 +878,49 @@ void main() {
       final sorties = await db.preFlightDao.getSortiesForSession(sessionId);
       expect(sorties.map((s) => s.flightId), unorderedEquals(ids));
       expect(sorties.map((s) => s.sequenceNo), [1, 2]);
+    });
+
+    test('Go needs take-off coordinates', () async {
+      final flightId = await createSortie();
+      for (final item
+          in await db.preFlightDao.loadBlockingChecklistItemsForSortie(
+            flightId,
+          )) {
+        final isNumber = item.responseType == ChecklistResponseTypes.number;
+        await db.preFlightDao.saveChecklistResponse(
+          flightId: flightId,
+          itemId: item.id,
+          response: isNumber ? 'VALUE' : 'PASS',
+          valueNumber: isNumber ? 25.2 : null,
+          createdBy: 'u1',
+        );
+      }
+      Future<void> go() => db.preFlightDao.submitGoNoGoDecision(
+        flightId: flightId,
+        decision: FinalDecision.go,
+        decisionBy: 'u1',
+      );
+      await expectLater(go(), throwsA(isA<AppFailure>()));
+      expect(
+        await db.preFlightDao.validatePreflightCompletion(flightId),
+        contains('Take-off coordinates are required.'),
+      );
+      await expectLater(
+        db.preFlightDao.updateSortieLocation(
+          flightId: flightId,
+          latitude: 95,
+          longitude: 77.59,
+          performedBy: 'u1',
+        ),
+        throwsA(isA<AppFailure>()),
+      );
+      await db.preFlightDao.updateSortieLocation(
+        flightId: flightId,
+        latitude: 12.97,
+        longitude: 77.59,
+        performedBy: 'u1',
+      );
+      await go();
     });
 
     test('a second Go on the same sortie is refused', () async {
@@ -1098,6 +1153,10 @@ void main() {
       await v10.customStatement('DROP INDEX idx_audit_events_$scope');
       await v10.customStatement('ALTER TABLE audit_events DROP COLUMN $scope');
     }
+    // v15 added the sortie's take-off location.
+    for (final column in ['location_name', 'latitude', 'longitude']) {
+      await v10.customStatement('ALTER TABLE sorties DROP COLUMN $column');
+    }
     await v10.customStatement('PRAGMA user_version = 10');
     await v10.close();
 
@@ -1162,6 +1221,10 @@ void main() {
       for (final scope in ['session_id', 'flight_id']) {
         await v2.customStatement('DROP INDEX idx_audit_events_$scope');
         await v2.customStatement('ALTER TABLE audit_events DROP COLUMN $scope');
+      }
+      // v15 added the sortie's take-off location.
+      for (final column in ['location_name', 'latitude', 'longitude']) {
+        await v2.customStatement('ALTER TABLE sorties DROP COLUMN $column');
       }
       await v2.customStatement('PRAGMA user_version = 2');
       await v2.close();

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- Splash gradient, same as the login screen (AppAuthTheme.backgroundGradient). -->
+    <color name="splash_top">#DCEAF2</color>
+    <color name="splash_middle">#10263A</color>
+    <color name="splash_bottom">#07131F</color>
+    <!-- Android 12+ system splash only supports one solid colour. -->
+    <color name="splash_background">#10263A</color>
+</resources>

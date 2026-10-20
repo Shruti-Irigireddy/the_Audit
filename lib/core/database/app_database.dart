@@ -120,9 +120,11 @@ class FieldSessions extends Table {
   Set<Column> get primaryKey => {sessionId};
 
   DateTimeColumn get date => dateTime()();
-  TextColumn get locationName => text()();
-  RealColumn get latitude => real()();
-  RealColumn get longitude => real()();
+  // The site is now recorded per sortie (Sorties.location*); kept for
+  // sessions created before v15.
+  TextColumn get locationName => text().nullable()();
+  RealColumn get latitude => real().nullable()();
+  RealColumn get longitude => real().nullable()();
   TextColumn get missionType => text()();
   // Team members - list of userIds (multi-enum)
   // Vehicle taken - list of vehicleIds (multi-enum)
@@ -398,6 +400,10 @@ class Sorties extends Table {
   IntColumn get checklistTemplateVersion => integer()();
   DateTimeColumn get takeoffAt => dateTime().nullable()();
   DateTimeColumn get landingAt => dateTime().nullable()();
+  // Take-off location, set in pre-flight; required before Go.
+  TextColumn get locationName => text().nullable()();
+  RealColumn get latitude => real().nullable()();
+  RealColumn get longitude => real().nullable()();
   // Post-flight notes - embedded table with checklist items (multi-enum)
   TextColumn get flightStatus => text()
       .withDefault(const Constant(FlightStatus.preflight))
@@ -716,7 +722,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 14;
+  int get schemaVersion => 15;
 
   @override
   MigrationStrategy get migration {
@@ -794,7 +800,18 @@ class AppDatabase extends _$AppDatabase {
             "WHERE flight_status = 'LANDED'",
           );
           // SQLite can't add a CHECK to a table: rebuild these three.
-          await m.alterTable(TableMigration(sorties));
+          // The rebuild uses today's table, so columns added in later
+          // versions (v15's take-off location) start empty here.
+          await m.alterTable(
+            TableMigration(
+              sorties,
+              newColumns: [
+                sorties.locationName,
+                sorties.latitude,
+                sorties.longitude,
+              ],
+            ),
+          );
           await m.alterTable(TableMigration(fieldSessions));
           await m.alterTable(TableMigration(postFlightNotes));
 
@@ -808,6 +825,17 @@ class AppDatabase extends _$AppDatabase {
           // Data only: default equipment lists added since (Striver's).
           // Lists that already exist are left as they are.
           await _insertDefaultEquipmentLists();
+        }
+        if (from < 15) {
+          // Location moves from the session to each sortie. Session columns
+          // become optional (SQLite needs a table rebuild for that).
+          await m.alterTable(TableMigration(fieldSessions));
+          // Databases older than v13 already got these from the v13 rebuild.
+          if (from >= 13) {
+            await m.addColumn(sorties, sorties.locationName);
+            await m.addColumn(sorties, sorties.latitude);
+            await m.addColumn(sorties, sorties.longitude);
+          }
         }
       },
       // SQLite ignores `references(...)` unless this is on for each

@@ -1,9 +1,9 @@
 class FieldSessionEntity {
   final String sessionId;
   final DateTime date;
-  final String locationName;
-  final double latitude;
-  final double longitude;
+  final String? locationName;
+  final double? latitude;
+  final double? longitude;
   final String missionType;
   final String sessionStatus;
   final DateTime createdAt;
@@ -14,9 +14,9 @@ class FieldSessionEntity {
   const FieldSessionEntity({
     required this.sessionId,
     required this.date,
-    required this.locationName,
-    required this.latitude,
-    required this.longitude,
+    this.locationName,
+    this.latitude,
+    this.longitude,
     required this.missionType,
     required this.sessionStatus,
     required this.createdAt,

@@ -153,6 +153,33 @@ class PreFlightCubit extends Cubit<PreFlightState> {
     }
   }
 
+  /// Saves the take-off coordinates and refreshes just the sortie (no full
+  /// reload, so the checklist below doesn't redraw). Returns whether it
+  /// worked.
+  Future<bool> updateSortieLocation({
+    required String flightId,
+    required double latitude,
+    required double longitude,
+    required String performedBy,
+  }) async {
+    _log.i('updateSortieLocation($flightId)');
+    try {
+      await _repository.updateSortieLocation(
+        flightId: flightId,
+        latitude: latitude,
+        longitude: longitude,
+        performedBy: performedBy,
+      );
+      final sortie = await _repository.getSortieById(flightId);
+      emit(state.copyWith(selectedSortie: sortie, errorMessage: null));
+      return true;
+    } catch (error, stackTrace) {
+      _log.e('updateSortieLocation failed', error, stackTrace);
+      _emitFailure(error);
+      return false;
+    }
+  }
+
   Future<void> updateSortieBasicInfo({
     required String flightId,
     String? picUserId,
